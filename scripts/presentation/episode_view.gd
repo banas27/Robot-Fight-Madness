@@ -1,8 +1,6 @@
 extends "res://scripts/hud.gd"
 ## Independent render world. The studio only owns visual rigs, never physics bodies.
 const Shapes = preload("res://scripts/shapes.gd")
-const SawArt = preload("res://scripts/art/riptide_visual.gd")
-const DrumArt = preload("res://scripts/art/bulldozer_visual.gd")
 const RobotArt = preload("res://scripts/art/robot_visual.gd")
 const CombatRobot = preload("res://scripts/combat/robot.gd")
 const SIZE := Vector2(720, 1280)
@@ -35,7 +33,7 @@ func _ready() -> void:
 		var plinth := Node3D.new()
 		stage.add_child(plinth)
 		_build_plinth(plinth, bot.team_color)
-		var model: RobotArt = SawArt.new() if bot.kind == "saw" else DrumArt.new()
+		var model: RobotArt = bot.make_visual()
 		plinth.add_child(model)
 		model.position.y = 0.40
 		plinths.append(plinth)

@@ -1,0 +1,7 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/arena_combat.tscn" id="1"]
+[ext_resource type="Script" path="res://scripts/art/bulldozer_tracks_visual.gd" id="2"]
+
+[node name="TrackedBulldozerTest" instance=ExtResource("1")]
+bulldozer_visual_override = ExtResource("2")

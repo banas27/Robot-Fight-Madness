@@ -18,6 +18,7 @@ var opponent: RigidBody3D
 var active := false
 var preparing := true
 var art: RobotArt
+var visual_override: Script
 var shape_roles: Dictionary = {}
 var rotor_owner: int
 var weapon_pivot: Vector3
@@ -128,8 +129,13 @@ func configure(weapon_kind: String, settings: Dictionary, phase: float, show_art
 	physics_material_override = physics
 	Fit.install(self)
 	if show_art:
-		art = SawArt.new() if kind == "saw" else DrumArt.new()
+		art = make_visual()
 		add_child(art)
+
+func make_visual() -> RobotArt:
+	if visual_override != null:
+		return visual_override.new()
+	return SawArt.new() if kind == "saw" else DrumArt.new()
 
 func add_solid(shape: Shape3D, local: Transform3D, role: String) -> void:
 	var owner := create_shape_owner(self)

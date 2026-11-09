@@ -11,6 +11,7 @@ const EpisodeView = preload("res://scripts/presentation/episode_view.gd")
 const ContactAudit = preload("res://scripts/combat/contact_audit.gd")
 const TIME_EPSILON := 0.000001
 
+@export var bulldozer_visual_override: Script
 var combat: Dictionary
 var presentation: Dictionary
 var impact_fx: ImpactFX
@@ -193,6 +194,8 @@ func _build_bots() -> void:
 		else:
 			bot = CombatRobot.new()
 		var kind := "saw" if i == 0 else "drum"
+		if kind == "drum":
+			bot.visual_override = bulldozer_visual_override
 		bot.configure(kind, combat, rng.randf_range(0, 6), not headless)
 		bot.trace_orders = trace != null and trace.detailed
 		if contact_audit != null:

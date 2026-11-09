@@ -2,7 +2,7 @@
 
 ## Bulldozer tracked review
 
-The tracked variant has 36 moving shoes per side around three road wheels, with the existing orange upper hull and spiked drum. Open [the tracked review scene](../scenes/review/bulldozer_tracks_review.tscn) in Godot and press **F6**. The track loop and its rotating parts are visual assemblies for this review. The match still loads Bulldozer v04.
+The tracked variant has 36 moving shoes per side around three road wheels, with the existing orange upper hull and spiked drum. Open [the tracked review scene](../scenes/review/bulldozer_tracks_review.tscn) in Godot and press **F6** for the turntable. The [tracked test arena](../scenes/review/arena_tracked_bulldozer_test.tscn) uses the same tracked rig in the introduction, match and showcase. Its belts animate from the chassis movement. The collision, drive and damage rules come from the wheeled fighter. The default arena loads Bulldozer v04.
 
 - [Editable Blender source](source/robots/bulldozer/bulldozer_v05_tracks.blend) · [Runtime review GLB](../assets/robots/bulldozer/bulldozer_v05_tracks.glb)
 - [Godot motion review](../renders/bulldozer-tracks/bulldozer-tracks.mp4) · [Close-up still](../renders/bulldozer-tracks/bulldozer-tracks.png)
