@@ -608,6 +608,9 @@ func _recover(forward: Vector3, toward: Vector3, radius: Vector2, reason := "") 
 	_choose_escape(forward, toward, radius)
 
 func _choose_escape(forward: Vector3, toward: Vector3, radius: Vector2) -> void:
+	_baseline_escape_route(forward, toward, radius)
+
+func _baseline_escape_route(forward: Vector3, toward: Vector3, radius: Vector2) -> void:
 	var away := -toward if not toward.is_zero_approx() else -forward
 	var opponent_front: Vector3 = deck_forward(opponent.global_basis)
 	var threat: Vector3 = opponent.position + opponent.linear_velocity.slide(Vector3.UP) * 0.19
@@ -642,8 +645,7 @@ func _recover_order(delta: float, radius: Vector2, forward: Vector3, toward: Vec
 		if capability != Capability.ARMED:
 			_resume_tactics(radius, toward)
 		elif kind == "saw":
-			_begin_flank(radius)
-			transition_reason = "clear of opponent" if separated else "recovery time limit"
+			_finish_saw_recovery(radius, separated)
 		else:
 			_enter(Maneuver.LINE_UP)
 		return Vector2.ZERO
@@ -656,6 +658,10 @@ func _recover_order(delta: float, radius: Vector2, forward: Vector3, toward: Vec
 	var throttle := clampf(1.0 - absf(angle) * 0.63, 0.0, 1.0)
 	var speed := -minf(float(cfg.reverse_speed), drive_speed * 0.80) if recovery_reverse else drive_speed * 0.88
 	return _steer(angle, speed * throttle)
+
+func _finish_saw_recovery(radius: Vector2, separated: bool) -> void:
+	_begin_flank(radius)
+	transition_reason = "clear of opponent" if separated else "recovery time limit"
 
 func _begin_flank(radius: Vector2) -> void:
 	_enter(Maneuver.REPOSITION, "start flank approach")

@@ -3,6 +3,8 @@ extends "res://scripts/match.gd"
 const CombatRobot = preload("res://scripts/combat/robot.gd")
 const RiptideFlank = preload("res://scripts/combat/riptide_flank.gd")
 const RiptideRailExit = preload("res://scripts/combat/riptide_rail_exit.gd")
+const RiptideRecoveryControl = preload("res://scripts/combat/riptide_recovery_control.gd")
+const RiptideTrackedRoutes = preload("res://scripts/combat/riptide_tracked_routes.gd")
 const RiptideTrackedFlank = preload("res://scripts/combat/riptide_tracked_flank.gd")
 const BulldozerTrackedIntercept = preload("res://scripts/combat/bulldozer_tracked_intercept.gd")
 const WeaponContact = preload("res://scripts/combat/weapon_contact.gd")
@@ -112,7 +114,7 @@ func _ready() -> void:
 			push_error("Wheel/drum audit requires --trace and a tick,wheel-shape,drum-shape specification.")
 			get_tree().quit(2)
 			return
-	if riptide_ai not in ["baseline", "candidate", "rail-exit", "tracked-flank"]:
+	if riptide_ai not in ["baseline", "candidate", "rail-exit", "tracked-flank", "tracked-routes", "recovery-control"]:
 		push_error("Unknown Riptide AI: " + riptide_ai)
 		get_tree().quit(2)
 		return
@@ -120,7 +122,7 @@ func _ready() -> void:
 		push_error("Unknown Bulldozer AI: " + bulldozer_ai)
 		get_tree().quit(2)
 		return
-	if not bulldozer_uses_tracks and (riptide_ai == "tracked-flank" or bulldozer_ai != "baseline"):
+	if not bulldozer_uses_tracks and (riptide_ai in ["tracked-flank", "tracked-routes", "recovery-control"] or bulldozer_ai != "baseline"):
 		push_error("Tracked AI policies require the functional tracked arena.")
 		get_tree().quit(2)
 		return
@@ -211,6 +213,10 @@ func _build_bots() -> void:
 			bot = RiptideRailExit.new()
 		elif i == 0 and riptide_ai == "tracked-flank":
 			bot = RiptideTrackedFlank.new()
+		elif i == 0 and riptide_ai == "tracked-routes":
+			bot = RiptideTrackedRoutes.new()
+		elif i == 0 and riptide_ai == "recovery-control":
+			bot = RiptideRecoveryControl.new()
 		elif i == 1 and bulldozer_ai == "tracked-intercept":
 			bot = BulldozerTrackedIntercept.new()
 		else:

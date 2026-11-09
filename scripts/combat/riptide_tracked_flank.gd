@@ -48,7 +48,7 @@ func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 	var cut := forward.signed_angle_to(aim, Vector3.UP)
 	if maneuver == Maneuver.ATTACK:
 		var scored := exchange_hit and maneuver_age >= 0.11
-		var closed := maneuver_age >= 0.24 and (front > 0.86 or absf(cut) > 1.08)
+		var closed := _cut_closed(front, cut, distance)
 		if scored or closed or (stalled > 0.28 and maneuver_age > 0.32) or maneuver_age >= 0.86:
 			_recover(forward, toward, radius, "saw hit" if scored else ("drum covered the cut" if closed else "pass exhausted"))
 			return _exit_order(delta, radius, forward, toward, distance)
@@ -65,8 +65,8 @@ func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 	var aligned := absf(cut) < lerpf(0.40, 0.72, mobile)
 	# A side cut can start from an open shoulder, even when a full rear
 	# route would let the slower opponent pivot back onto the approach.
-	var open := front < 0.70 or (front < 0.88 and absf(offset.dot(right)) > 1.04)
-	if ready and aligned and open and distance < 3.36:
+	var open := _cut_open(front, absf(offset.dot(right)))
+	if ready and aligned and open and distance < 3.36 and _exit_available(radius, forward, toward, aim, distance):
 		cut_heading = aim
 		target_zone = "rear" if front < -0.76 else ("side" if front < 0.50 else "shoulder")
 		_enter(Maneuver.ATTACK, "teeth aligned on " + target_zone)
@@ -89,6 +89,7 @@ func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 			var route := (gate - position).slide(Vector3.UP)
 			var alignment := forward.dot(route.normalized())
 			var score := -route.length() + alignment * (1.10 + (1.0 - mobile) * 1.65) - 5.0 * _rail_overflow(gate, limit)
+			score += _gate_preference(gate, estimated_center, nose, forward, radius)
 			score += 0.62 if sign_candidate == old_side and maneuver_age > 0.08 else 0.0
 			score -= 0.48 if sign_candidate == last_approach_side and maneuver_age < 0.35 else 0.0
 			if score > best:
@@ -104,6 +105,18 @@ func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 	if align_now and (not ready or not aligned):
 		speed *= 0.44
 	return _heading_order(forward, heading, speed, reverse)
+
+func _cut_open(front: float, lateral: float) -> bool:
+	return front < 0.70 or (front < 0.88 and lateral > 1.04)
+
+func _cut_closed(front: float, cut: float, _distance: float) -> bool:
+	return maneuver_age >= 0.24 and (front > 0.86 or absf(cut) > 1.08)
+
+func _exit_available(_radius: Vector2, _forward: Vector3, _toward: Vector3, _aim: Vector3, _distance: float) -> bool:
+	return true
+
+func _gate_preference(_gate: Vector3, _center: Vector3, _nose: Vector3, _forward: Vector3, _radius: Vector2) -> float:
+	return 0.0
 
 func _choose_escape(forward: Vector3, toward: Vector3, radius: Vector2) -> void:
 	last_approach_side = lane_side

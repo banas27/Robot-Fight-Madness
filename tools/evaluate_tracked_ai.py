@@ -93,32 +93,40 @@ def summarize(rows):
     return results
 
 
-def main():
+def main(*, pairings=PAIRINGS, reserved=RESERVED, development=SEEDS, diagnostics=(),
+         diagnostic_pairings=(), extra_metrics=None, extra_summary=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--godot", required=True)
-    parser.add_argument("--split", choices=("development", "reserved", "parity"), required=True)
+    splits = ("development", "reserved", "parity") + (("diagnostic",) if diagnostics else ())
+    parser.add_argument("--split", choices=splits, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--pairings", nargs="+", choices=PAIRINGS, default=list(PAIRINGS))
+    parser.add_argument("--pairings", nargs="+", choices=(*pairings, *diagnostic_pairings))
     parser.add_argument("--jobs", type=int, default=6)
     parser.add_argument("--contacts", action="store_true")
     args = parser.parse_args()
+    selection = {**pairings, **diagnostic_pairings}
+    args.pairings = args.pairings or list(pairings)
+    if args.split in ("reserved", "parity") and any(key not in pairings for key in args.pairings):
+        parser.error("Diagnostic controls are available only on known seeds")
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    manifest = RESERVED if args.split == "reserved" else SEEDS
-    split = "development" if args.split == "parity" else args.split
-    seeds = json.loads(manifest.read_text(encoding="utf-8"))[split]
     if args.split == "parity":
         seeds = [13, 25]
-    elif len(seeds) != 20 or len(set(seeds)) != 20:
-        parser.error("Expected exactly 20 distinct seeds")
+    elif args.split == "diagnostic":
+        seeds = list(diagnostics)
+    else:
+        manifest = reserved if args.split == "reserved" else development
+        seeds = json.loads(manifest.read_text(encoding="utf-8"))[args.split]
+        if len(seeds) != 20 or len(set(seeds)) != 20:
+            parser.error("Expected exactly 20 distinct seeds")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT, text=True).strip())
-    if args.split == "reserved" and (dirty or set(args.pairings) != set(PAIRINGS)):
-        parser.error("Reserved runs require a clean frozen checkout and all four pairings")
+    if args.split == "reserved" and (dirty or set(args.pairings) != set(pairings)):
+        parser.error("Reserved runs require a clean frozen checkout and all evaluation pairings")
 
     def run(case):
         pairing, seed, layout = case
-        saw, drum = PAIRINGS[pairing]
+        saw, drum = selection[pairing]
         def run_one(episode=False, trace_level="standard"):
             return run_match(args.godot, root / pairing, seed, layout, saw, episode, trace_level,
                              scene=SCENE, extra_args=(f"--bulldozer-ai={drum}",), keep_log=True)
@@ -138,7 +146,10 @@ def main():
                         assert abs(alternate["showcase_duration"] - 5.0) < 1e-6
             suffix = "-contacts" if args.contacts else ""
             log = root / pairing / saw / layout / f"{seed}{suffix}.log"
-            return case, case_metrics(match, trace, log.read_text(encoding="utf-8"))
+            row = case_metrics(match, trace, log.read_text(encoding="utf-8"))
+            if extra_metrics is not None:
+                row.update(extra_metrics(match, trace))
+            return case, row
         except (OSError, ValueError, AssertionError, KeyError, RuntimeError, TypeError, subprocess.TimeoutExpired) as exc:
             return case, {"error": str(exc) or type(exc).__name__}
 
@@ -152,7 +163,7 @@ def main():
     starts = {}
     for (pair, seed, layout), row in results:
         if "error" not in row:
-            saw, _ = PAIRINGS[pair]
+            saw, _ = selection[pair]
             suffix = "-contacts" if args.contacts else ""
             report = root / pair / saw / layout / f"{seed}{suffix}.match.json"
             poses = json.loads(report.read_text(encoding="utf-8"))["start_poses"]
@@ -162,11 +173,14 @@ def main():
             summary["errors"].append({"pair": pair, "seed": seed, "start": layout, **row})
         else:
             by_pair[pair].append(row)
+    def combined_summary(rows):
+        return {**summarize(rows), **(extra_summary(rows) if extra_summary else {})}
+
     for pair, rows in by_pair.items():
         summary["pairings"][pair] = {
-            "policies": PAIRINGS[pair], "expected": 2 * len(seeds),
-            "summary": summarize(rows) if rows else {},
-            "by_layout": {layout: summarize([r for r in rows if r["start"] == layout])
+            "policies": selection[pair], "expected": 2 * len(seeds),
+            "summary": combined_summary(rows) if rows else {},
+            "by_layout": {layout: combined_summary([r for r in rows if r["start"] == layout])
                           for layout in {r["start"] for r in rows}},
             "rows": rows,
         }

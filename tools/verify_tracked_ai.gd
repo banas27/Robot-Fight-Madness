@@ -3,6 +3,7 @@ extends SceneTree
 const Arena = preload("res://scenes/review/arena_tracked_bulldozer_test.tscn")
 const Robot = preload("res://scripts/combat/robot.gd")
 const SawPolicy = preload("res://scripts/combat/riptide_tracked_flank.gd")
+const RoutesPolicy = preload("res://scripts/combat/riptide_tracked_routes.gd")
 const DrumPolicy = preload("res://scripts/combat/bulldozer_tracked_intercept.gd")
 var failures := 0
 
@@ -94,18 +95,57 @@ func saw_fixture() -> void:
 	arena.queue_free()
 	await process_frame
 
+func rail_fixture() -> void:
+	var arena := Arena.instantiate()
+	root.add_child(arena)
+	arena.set_physics_process(false)
+	var saw := arena.bots[0] as Robot
+	var drum := arena.bots[1] as Robot
+	saw.position = Vector3(2.92, 0.40, -3.54)
+	saw.rotation.y = PI
+	drum.position = Vector3(0.53, 0.40, -3.54)
+	drum.rotation.y = -PI * 0.5
+	saw.freeze = false
+	saw.active = true
+	for owner in saw.get_shape_owners():
+		if saw.shape_roles[owner] == "wheel":
+			saw.damage_component(39.0, "wheel", saw.shape_owner_get_shape_index(owner, 0))
+			break
+	var delta := 1.0 / Engine.physics_ticks_per_second
+	for _tick in range(12):
+		await physics_frame
+	var origin := saw.position
+	var initial_gap := drum.position.distance_to(origin)
+	var toward := (drum.position - origin).slide(Vector3.UP).normalized()
+	saw._recover(Robot.deck_forward(saw.global_basis), toward, arena._arena_radius(), "controlled rail recovery")
+	check(saw.recovery_direction.z > 0.40, "damaged saw chooses the open length of the rail")
+	for _tick in range(240):
+		await physics_frame
+		saw.step(delta, arena._arena_radius())
+		if saw.maneuver != Robot.Maneuver.RECOVER:
+			break
+	check(saw.failed_wheel_count == 1 and saw.position.z > origin.z + 0.55
+		and drum.position.distance_to(saw.position) > initial_gap + 0.40,
+		"damaged saw creates physical separation from the stationary drum")
+	check(saw.maneuver == Robot.Maneuver.LINE_UP, "rail recovery releases the saw for a new approach")
+	arena.queue_free()
+	await process_frame
+
 func run() -> void:
 	var probe := Arena.instantiate()
 	root.add_child(probe)
-	var selected: bool = probe.bots[0].get_script() == SawPolicy and probe.bots[1].get_script() == DrumPolicy
+	var routes: bool = probe.bots[0].get_script() == RoutesPolicy
+	var selected: bool = (routes or probe.bots[0].get_script() == SawPolicy) and probe.bots[1].get_script() == DrumPolicy
 	probe.queue_free()
 	await process_frame
 	if not selected:
-		push_error("Select both candidates with --riptide-ai=tracked-flank --bulldozer-ai=tracked-intercept")
+		push_error("Select tracked-flank or tracked-routes and --bulldozer-ai=tracked-intercept")
 		quit(2)
 		return
 	await arc_fixture(0, false)
 	await arc_fixture(1, true)
 	await saw_fixture()
+	if routes:
+		await rail_fixture()
 	print("RFS_TRACKED_AI_FIXTURES ", failures, " failures")
 	quit(1 if failures else 0)
