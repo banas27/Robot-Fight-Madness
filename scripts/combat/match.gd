@@ -2,6 +2,7 @@ extends "res://scripts/match.gd"
 ## Combat and presentation consume the same fixed-tick solver contacts.
 const CombatRobot = preload("res://scripts/combat/robot.gd")
 const RiptideFlank = preload("res://scripts/combat/riptide_flank.gd")
+const RiptideRailExit = preload("res://scripts/combat/riptide_rail_exit.gd")
 const WeaponContact = preload("res://scripts/combat/weapon_contact.gd")
 const ImpactFX = preload("res://scripts/combat/impacts.gd")
 const DebugOverlay = preload("res://scripts/combat/debug_overlay.gd")
@@ -81,9 +82,10 @@ func _ready() -> void:
 		elif arg.begins_with("--trace="):
 			trace_path = arg.trim_prefix("--trace=")
 			trace = preload("res://scripts/combat/trace.gd").new()
+			trace.detailed = "--contact-trace" in OS.get_cmdline_user_args()
 		elif arg.begins_with("--riptide-ai="):
 			riptide_ai = arg.trim_prefix("--riptide-ai=")
-	if riptide_ai not in ["baseline", "candidate"]:
+	if riptide_ai not in ["baseline", "candidate", "rail-exit"]:
 		push_error("Unknown Riptide AI: " + riptide_ai)
 		get_tree().quit(2)
 		return
@@ -167,9 +169,16 @@ func _build_bots() -> void:
 		overlay = DebugOverlay.new()
 		add_child(overlay)
 	for i in range(2):
-		var bot: CombatRobot = RiptideFlank.new() if i == 0 and riptide_ai == "candidate" else CombatRobot.new()
+		var bot: CombatRobot
+		if i == 0 and riptide_ai == "candidate":
+			bot = RiptideFlank.new()
+		elif i == 0 and riptide_ai == "rail-exit":
+			bot = RiptideRailExit.new()
+		else:
+			bot = CombatRobot.new()
 		var kind := "saw" if i == 0 else "drum"
 		bot.configure(kind, combat, rng.randf_range(0, 6), not headless)
+		bot.trace_orders = trace != null and trace.detailed
 		add_child(bot)
 		bot.position = Vector3(rng.randf_range(-0.4, 0.4), 0.4, 3.4 if i == 0 else -3.4)
 		bot.rotation.y = 0.0 if i == 0 else PI
@@ -219,7 +228,10 @@ func _physics_process(delta: float) -> void:
 	close_run = close_run + delta if bots[0].position.distance_to(bots[1].position) < 2.20 else 0.0
 	longest_close_run = maxf(longest_close_run, close_run)
 	var radius := _arena_radius()
-	var pair := WeaponContact.read_pair(bots, delta)
+	var probe = trace if trace != null and trace.detailed else null
+	if probe != null:
+		probe.contact_time = fight_elapsed
+	var pair := WeaponContact.read_pair(bots, delta, probe)
 	last_weapon_depth = float(pair.weapon_depth)
 	peak_weapon_depth = maxf(peak_weapon_depth, last_weapon_depth)
 	deep_overlap_time = deep_overlap_time + delta if last_weapon_depth > 0.025 else 0.0
@@ -494,7 +506,8 @@ func _write_report() -> void:
 	print("RFS_RESULT " + JSON.stringify(report))
 	_write_json(report_path, report)
 	if trace != null:
-		_write_json(trace_path, {"seed": match_seed, "robots": trace.entries, "strikes": trace.strikes})
+		_write_json(trace_path, {"seed": match_seed, "robots": trace.entries, "strikes": trace.strikes,
+			"contact_runs": trace.contact_runs, "deep_contacts": trace.deep_contacts})
 	if perf_path != "" and not frame_times.is_empty():
 		var total := 0.0
 		for sample in frame_times:

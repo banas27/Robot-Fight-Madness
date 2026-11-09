@@ -40,6 +40,9 @@ const WHEEL_FAILED := 39.0
 const WHEEL_MOUNT_BROKEN := 72.0
 var maneuver := Maneuver.LINE_UP
 var maneuver_age := 0.0
+var transition_reason := ""
+var trace_orders := false
+var last_order := Vector2.ZERO
 var maneuver_counts := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 var capability := Capability.ARMED
 var press_wide := false
@@ -184,6 +187,8 @@ func step(delta: float, radius: Vector2) -> void:
 	var braking := true
 	if active and hp > 0 and is_instance_valid(opponent):
 		var order := _drive_order(delta, radius, forward)
+		if trace_orders:
+			last_order = order
 		desired_speed = order.x
 		desired_yaw = order.y
 		braking = absf(desired_speed) < absf(linear_velocity.dot(forward)) or maneuver == Maneuver.RECOVER
@@ -247,7 +252,7 @@ func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 	pressure_time = pressure_time + delta if opponent_contact else maxf(0.0, pressure_time - delta * 2.4)
 	stalled = stalled + delta if opponent_contact and planar_speed < 0.52 else maxf(0.0, stalled - delta * 2.0)
 	if wall_trap or (wall_contact and pressure_time > 0.30):
-		_recover(forward, toward, radius)
+		_recover(forward, toward, radius, "nose toward rail" if wall_trap else "rail under pressure")
 		return Vector2.ZERO
 	if capability == Capability.UNARMED:
 		if stalled > 0.92 and maneuver_age > 0.70:
@@ -307,7 +312,7 @@ func _saw_order(delta: float, radius: Vector2, forward: Vector3, toward: Vector3
 		else:
 			return _heading_order(forward, dodge_heading, drive_speed, dodge_reverse)
 	if escape_requested or stalled > float(cfg.stuck_seconds) + 0.02 or (maneuver == Maneuver.REPOSITION and pressure_time > 0.48):
-		_recover(forward, toward, radius)
+		_recover(forward, toward, radius, "incoming strike" if escape_requested else "blocked approach")
 		return Vector2.ZERO
 	if _try_dodge(radius, forward, distance):
 		return _heading_order(forward, dodge_heading, drive_speed, dodge_reverse)
@@ -324,12 +329,12 @@ func _saw_order(delta: float, radius: Vector2, forward: Vector3, toward: Vector3
 		var wide: bool = (position - opponent.position).dot(route_right) * turn_side > 1.63
 		var shoulder := wide and distance < 3.43 and lane.length() < 1.18
 		if ready and maneuver_age >= 0.24 and (opening or shoulder):
-			_enter(Maneuver.ATTACK)
+			_enter(Maneuver.ATTACK, "open approach" if opening else "outside shoulder")
 		elif maneuver_age > 2.05 + (1.0 - drive_grip()):
 			if front < 0.86 and distance < 3.90:
-				_enter(Maneuver.ATTACK)
+				_enter(Maneuver.ATTACK, "approach time limit with opening")
 			else:
-				_recover(forward, toward, radius)
+				_recover(forward, toward, radius, "approach time limit")
 				return Vector2.ZERO
 		else:
 			# Turn the saw in as the lane opens, then go through that opening.
@@ -339,7 +344,7 @@ func _saw_order(delta: float, radius: Vector2, forward: Vector3, toward: Vector3
 			var approach_speed := drive_speed * clampf(lane.length() / 1.7, 0.38, 0.96)
 			return _heading_order(forward, heading, approach_speed, flank_reverse and not opening)
 	if (maneuver_age >= 0.23 and exchange_hit) or pass_time >= 0.82 or maneuver_age >= 1.58:
-		_recover(forward, toward, radius)
+		_recover(forward, toward, radius, "scored hit" if exchange_hit else "pass time limit")
 		return Vector2.ZERO
 	var side: float = signf(opponent.global_basis.x.dot(-toward))
 	if is_zero_approx(side):
@@ -378,7 +383,7 @@ func _try_dodge(radius: Vector2, forward: Vector3, distance: float) -> bool:
 	dodge_heading = chosen
 	dodge_reverse = forward.dot(chosen) < -0.36
 	evaded_charge = opponent.charge_id
-	_enter(Maneuver.EVADE)
+	_enter(Maneuver.EVADE, "avoid charge lane")
 	return true
 
 func _lead(seconds: float, limit: float) -> Vector3:
@@ -445,8 +450,9 @@ func _steer(angle: float, speed: float) -> Vector2:
 	var gain := float(cfg.turn_gain) * (1.0 if maneuver == Maneuver.RECOVER else float(tune.steering_gain))
 	return Vector2(speed, clampf(angle * gain, -limit, limit))
 
-func _enter(next: Maneuver) -> void:
+func _enter(next: Maneuver, reason := "") -> void:
 	maneuver = next
+	transition_reason = reason
 	maneuver_age = 0.0
 	maneuver_counts[next] += 1
 	exchange_hit = false
@@ -523,8 +529,8 @@ func _heading_order(forward: Vector3, lane: Vector3, speed: float, reverse: bool
 	var throttle := clampf(1.0 - absf(angle) * 0.65, 0.0, 0.90)
 	return _steer(angle, (-minf(speed, float(cfg.reverse_speed)) if reverse else speed) * throttle)
 
-func _recover(forward: Vector3, toward: Vector3, radius: Vector2) -> void:
-	_enter(Maneuver.RECOVER)
+func _recover(forward: Vector3, toward: Vector3, radius: Vector2, reason := "") -> void:
+	_enter(Maneuver.RECOVER, reason)
 	recovery_count += 1
 	escape_requested = false
 	pressure_time = 0.0
@@ -572,6 +578,7 @@ func _recover_order(delta: float, radius: Vector2, forward: Vector3, toward: Vec
 			_resume_tactics(radius, toward)
 		elif kind == "saw":
 			_begin_flank(radius)
+			transition_reason = "clear of opponent" if separated else "recovery time limit"
 		else:
 			_enter(Maneuver.LINE_UP)
 		return Vector2.ZERO
@@ -586,7 +593,7 @@ func _recover_order(delta: float, radius: Vector2, forward: Vector3, toward: Vec
 	return _steer(angle, speed * throttle)
 
 func _begin_flank(radius: Vector2) -> void:
-	_enter(Maneuver.REPOSITION)
+	_enter(Maneuver.REPOSITION, "start flank approach")
 	_plan_saw_lane(radius)
 
 func _pick_flank(radius: Vector2, width: float) -> void:
