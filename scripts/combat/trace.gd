@@ -4,13 +4,18 @@ var entries := [{}, {}]
 var strikes: Array[Dictionary] = []
 var pending: Array[Dictionary] = []
 var next_sample := 0.0
+var detailed := false
+var contact_time := 0.0
+var contact_runs := {}
+var deep_contacts: Array[Dictionary] = []
+const EXIT_WINDOW := 0.60
 
 func _init() -> void:
 	for i in range(2):
 		entries[i] = {"name": "", "state": -1, "near_rail_s": 0.0, "corner_s": 0.0,
 			"slow_contact_s": 0.0, "pin_s": 0.0, "transitions": [], "recoveries": [], "escape": {},
 			"state_seconds": {}, "slow_run_s": 0.0, "longest_slow_run_s": 0.0,
-			"stalled_s": 0.0, "stall_run_s": 0.0, "passes": [], "pass_index": -1, "samples": []}
+			"stalled_s": 0.0, "stall_run_s": 0.0, "passes": [], "pass_index": -1, "samples": [], "exit_watch": []}
 
 func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, fighting: bool) -> void:
 	var gap: float = (bots[0].position - bots[1].position).slide(Vector3.UP).length()
@@ -50,14 +55,20 @@ func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, 
 			escape.gain = maxf(escape.gain, gap - float(escape.gap))
 			escape.clear_s = float(escape.clear_s) + delta if not bot.opponent_contact else 0.0
 			var moved: float = (bot.position - Vector3(escape.origin[0], escape.origin[1], escape.origin[2])).slide(Vector3.UP).length()
-			escape.separated = escape.separated or (escape.clear_s >= 0.13 and gap - float(escape.gap) >= 0.45 and moved >= 0.35)
+			if not escape.separated and escape.clear_s >= 0.13 and gap - float(escape.gap) >= 0.45 and moved >= 0.35:
+				escape.separated = true
+				escape.separation_at = time
+				escape.exit_clear = true
+				escape.repinned = false
+				row.exit_watch.append(escape)
+		_follow_exits(bot, row.exit_watch, gap, time, fighting)
 		var state: int = int(bot.maneuver) if fighting else -1
 		if state == row.state:
 			if state == 2:
 				var routes: Array = escape.routes
 				var direction := xyz(bot.recovery_direction)
 				if routes.back().direction != direction:
-					routes.append({"time": time, "direction": direction})
+					routes.append({"time": time, "direction": direction, "reverse": bot.recovery_reverse})
 			continue
 		if not escape.is_empty():
 			escape.end = time
@@ -87,7 +98,8 @@ func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, 
 		if state == 2:
 			row.escape = {"start": time, "gap": gap, "gain": 0.0, "clear_s": 0.0,
 				"origin": xyz(bot.position), "separated": false,
-				"routes": [{"time": time, "direction": xyz(bot.recovery_direction)}], "rail": near_x or near_z}
+				"routes": [{"time": time, "direction": xyz(bot.recovery_direction), "reverse": bot.recovery_reverse}],
+				"rail": near_x or near_z}
 	for i in range(pending.size() - 1, -1, -1):
 		var sample: Dictionary = pending[i]
 		var defender = sample.defender
@@ -100,15 +112,87 @@ func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, 
 		if time - float(result.time) >= 0.16 or not fighting:
 			pending.remove_at(i)
 
+func _follow_exits(bot, watches: Array, gap: float, time: float, fighting: bool) -> void:
+	for i in range(watches.size() - 1, -1, -1):
+		var exit: Dictionary = watches[i]
+		exit.exit_clear = exit.exit_clear and not bot.opponent_contact and gap >= float(exit.gap) + 0.20
+		exit.repinned = exit.repinned or (bot.opponent_contact and bot.wall_contact)
+		if time + 0.000001 >= float(exit.separation_at) + EXIT_WINDOW:
+			exit.sustained = exit.exit_clear
+			watches.remove_at(i)
+		elif not fighting:
+			exit.followup_censored = true
+			watches.remove_at(i)
+
 func _decision(bot, time: float, gap: float) -> Dictionary:
 	var toward: Vector3 = (bot.opponent.position - bot.position).slide(Vector3.UP).normalized()
 	var row := {"time": time, "state": int(bot.maneuver), "gap": gap, "grip": bot.drive_grip(),
 		"position": xyz(bot.position), "velocity": xyz(bot.linear_velocity), "facing": -bot.global_basis.z.dot(toward),
 		"target_front": bot.opponent.global_basis.z.dot(toward), "waypoint": xyz(bot.flank_goal),
-		"wall": bot.wall_contact, "contact": bot.opponent_contact, "rotor": bot.rotor_speed}
+		"wall": bot.wall_contact, "contact": bot.opponent_contact, "rotor": bot.rotor_speed,
+		"reason": bot.transition_reason}
 	if bot.has_method("decision_note"):
 		row.decision = bot.decision_note()
+	if detailed:
+		row.wheels = bot.wheel_state.duplicate()
+		row.weapon_disabled = bot.weapon_disabled
+		row.cooldown = bot.cooldown
+		row.latched = bot.strike_latched
+		row.target_local = xyz(bot.to_local(bot.opponent.position))
+		row.heading = xyz(-bot.global_basis.z)
+		row.motor_speed = bot.last_order.x
+		row.motor_yaw = bot.last_order.y
+		row.yaw_velocity = bot.angular_velocity.y
+		row.recovery_age = bot.maneuver_age if bot.maneuver == bot.Maneuver.RECOVER else 0.0
 	return row
+
+func observe_weapon(reason: String, attacker, contact: Dictionary) -> void:
+	if attacker.kind != "saw":
+		return
+	if not contact_runs.has(reason):
+		contact_runs[reason] = []
+	var runs: Array = contact_runs[reason]
+	var tick := roundi(contact_time * Engine.physics_ticks_per_second)
+	if not runs.is_empty() and int(runs.back().last_tick) >= tick - 1:
+		runs.back().last_tick = tick
+		runs.back().end = contact_time
+		return
+	runs.append({"start": contact_time, "end": contact_time, "last_tick": tick,
+		"roles": [contact.local_role, contact.other_role], "point": xyz(contact.point),
+		"attacker_local": xyz(attacker.to_local(contact.point)), "state": int(attacker.maneuver)})
+
+func inspect_depth(own, other, contact: Dictionary) -> void:
+	var query := PhysicsShapeQueryParameters3D.new()
+	var rid: RID = own.get_rid()
+	query.shape_rid = PhysicsServer3D.body_get_shape(rid, contact.local_shape)
+	query.transform = own.global_transform * PhysicsServer3D.body_get_shape_transform(rid, contact.local_shape)
+	query.collision_mask = other.collision_layer
+	query.exclude = [rid]
+	var space: PhysicsDirectSpaceState3D = own.get_world_3d().direct_space_state
+	var start := query.transform
+	var overlap_offsets := _overlap_offsets(space, query, start, contact.normal, other, contact.other_shape)
+	var cross_checks: Array[Dictionary] = []
+	if contact.depth >= 0.35:
+		for axis: Vector3 in [Vector3.UP, Vector3.DOWN, -contact.normal]:
+			cross_checks.append({"axis": xyz(axis),
+				"overlap_offsets": _overlap_offsets(space, query, start, axis, other, contact.other_shape)})
+	deep_contacts.append({"time": contact_time, "body": str(own.name), "depth": contact.depth,
+		"roles": [contact.local_role, contact.other_role], "shapes": [contact.local_shape, contact.other_shape],
+		"overlap_offsets": overlap_offsets, "cross_checks": cross_checks,
+		"normal": xyz(contact.normal), "point": xyz(contact.point),
+		"body_position": xyz(own.position), "opponent_position": xyz(other.position),
+		"relative": xyz(contact.relative)})
+
+func _overlap_offsets(space: PhysicsDirectSpaceState3D, query: PhysicsShapeQueryParameters3D,
+	start: Transform3D, axis: Vector3, other, shape_index: int) -> Array[float]:
+	var overlap_offsets: Array[float] = []
+	for offset: float in [0.0, 0.02, 0.05, 0.10, 0.20, 0.40]:
+		query.transform = start.translated(axis * offset)
+		for result in space.intersect_shape(query, 96):
+			if result.collider == other and result.shape == shape_index:
+				overlap_offsets.append(offset)
+				break
+	return overlap_offsets
 
 func _sample_failure(bot, row: Dictionary, gap: float, delta: float, time: float) -> void:
 	var tail: Dictionary = row.get("failure_tail", {})

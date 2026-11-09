@@ -3,7 +3,7 @@ param(
     [int]$Seed = 1,
     [string]$FFmpeg = "ffmpeg",
     [ValidateSet(30, 60)][int]$FPS = 30,
-    [ValidateSet("baseline", "candidate")][string]$RiptideAI
+    [ValidateSet("baseline", "candidate", "rail-exit")][string]$RiptideAI
 )
 # Windows PowerShell 5.1 / PowerShell 7. No installs, network access or account access.
 $ErrorActionPreference = "Stop"

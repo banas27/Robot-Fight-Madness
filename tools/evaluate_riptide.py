@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the two Riptide policies in the actual seeded combat scene."""
+"""Compare Riptide policies in the actual seeded combat scene."""
 import argparse
 import json
 import math
@@ -11,30 +11,37 @@ import subprocess
 
 PROJECT = Path(__file__).resolve().parents[1]
 SEEDS = PROJECT / "qa/riptide-ai/seeds.json"
+POLICIES = ("baseline", "candidate", "rail-exit")
 
 
-def run_match(godot, root, seed, layout, variant, episode=False):
+def run_match(godot, root, seed, layout, variant, episode=False, trace_level="standard"):
     folder = root / variant / layout
     folder.mkdir(parents=True, exist_ok=True)
     stem = str(seed) + ("-episode" if episode else "")
+    if trace_level != "standard":
+        stem += f"-{trace_level}"
     report, trace = (folder / f"{stem}.{ext}.json" for ext in ("match", "trace"))
     report.unlink(missing_ok=True)
     trace.unlink(missing_ok=True)
     args = [
         godot, "--headless", "--path", str(PROJECT), "--fixed-fps", "30", "--",
         "--autostop", f"--seed={seed}", f"--riptide-ai={variant}",
-        f"--report={report}", f"--trace={trace}",
+        f"--report={report}",
     ]
+    if trace_level != "untraced":
+        args.append(f"--trace={trace}")
+    if trace_level == "contacts":
+        args.append("--contact-trace")
     if not episode:
         args.append("--combat-only")
     if layout == "swapped":
         args.append("--swap-start")
     result = subprocess.run(args, capture_output=True, text=True, timeout=60)
     output = result.stdout + result.stderr
-    if result.returncode or "ERROR:" in output or not (report.exists() and trace.exists()):
+    if result.returncode or "ERROR:" in output or not report.exists() or (trace_level != "untraced" and not trace.exists()):
         raise RuntimeError(f"{variant}/{layout}/{seed} failed:\n{output}")
     match = json.loads(report.read_text(encoding="utf-8"))
-    decisions = json.loads(trace.read_text(encoding="utf-8"))
+    decisions = json.loads(trace.read_text(encoding="utf-8")) if trace.exists() else None
     assert (match["seed"], match["start"], match["riptide_ai"]) == (seed, layout, variant)
     assert match["physics_hz"] == 180 and 0 < match["fight_duration"] <= 25.0, report
     assert [pose[3] for pose in match["start_poses"]] == match["max_hp"], report
@@ -55,6 +62,8 @@ def metrics(match, trace):
     saw = trace["robots"][0]
     hits = [hit for hit in trace["strikes"] if hit["attacker"] == "Riptide"]
     flank = [p for p in saw["passes"] if p["intent"] in ("side", "rear")]
+    rail = [r for r in saw["recoveries"] if r["rail"]]
+    rail_observed = [r for r in rail if not r.get("followup_censored")]
     return {
         "seed": match["seed"], "start": match["start"], "winner": match["winner"],
         "hp_percent": [100 * ratio for ratio in match["remaining_ratio"]],
@@ -70,6 +79,12 @@ def metrics(match, trace):
         "stalled_s": saw["stalled_s"], "pin_s": saw["pin_s"],
         "recoveries": len(saw["recoveries"]),
         "separated": sum(r["separated"] for r in saw["recoveries"]),
+        "sustained_exits": sum(r.get("sustained", False) for r in saw["recoveries"]),
+        "rail_recoveries": len(rail),
+        "rail_observed": len(rail_observed),
+        "rail_opened_observed": sum(r["separated"] for r in rail_observed),
+        "rail_sustained": sum(r.get("sustained", False) for r in rail_observed),
+        "rail_repinned": sum(r.get("repinned", False) for r in rail_observed),
         "retreat_s": sum(saw["state_seconds"].get(s, 0) for s in ("2", "7")),
         "fight_s": match["fight_duration"],
         "peak_depth": match["peak_weapon_contact_depth"],
@@ -104,7 +119,9 @@ def aggregate(rows):
         **{key: mean(key) for key in ("damage_dealt", "damage_received", "stalled_s", "pin_s", "retreat_s", "fight_s")},
         **{key: total(key) for key in ("attack_attempts", "successful_attempts", "flank_conversions",
                                        "intended_flanks", "intended_flank_conversions", "weapon_hits",
-                                       "side_rear_hits", "recoveries", "separated")},
+                                       "side_rear_hits", "recoveries", "separated", "sustained_exits",
+                                       "rail_recoveries", "rail_observed", "rail_opened_observed",
+                                       "rail_sustained", "rail_repinned")},
         "retreat_percent": round(100 * total("retreat_s") / total("fight_s"), 2),
         "solver_outliers": solver_outliers(rows),
         **{f"max_{key}": max_metric(key) for key in ("peak_depth", "deep_contact_s", "peak_speed", "peak_lift", "arena_extent")},
@@ -116,13 +133,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--godot", required=True)
     parser.add_argument("--split", required=True, choices=("development", "evaluation", "parity"))
-    parser.add_argument("--variants", nargs="+", default=["baseline", "candidate"], choices=("baseline", "candidate"))
+    parser.add_argument("--variants", nargs="+", default=["baseline", "candidate"], choices=POLICIES)
+    parser.add_argument("--seed-manifest", type=Path, default=SEEDS)
     parser.add_argument("--layout", default="both", choices=("standard", "swapped", "both"))
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     root = args.output.resolve()
-    seeds = json.loads(SEEDS.read_text())
+    seeds = json.loads(args.seed_manifest.read_text())
     assert all(len(set(group)) == 20 for group in seeds.values())
     assert set(seeds["development"]).isdisjoint(seeds["evaluation"])
     layouts = ["standard", "swapped"] if args.layout == "both" else [args.layout]
@@ -147,6 +165,11 @@ def main():
                 differences = [k for k in sorted(combat_fields) if match[k] != full[k]]
                 if differences or trace != full_trace:
                     raise AssertionError(f"Parity {variant}/{layout}/{seed}: {differences}, trace equal={trace == full_trace}")
+                for level in ("untraced", "contacts"):
+                    extra, _ = run_match(args.godot, root, seed, layout, variant, trace_level=level)
+                    changed = [k for k in sorted(match) if match[k] != extra[k]]
+                    if changed:
+                        raise AssertionError(f"Trace {level} changed {variant}/{layout}/{seed}: {changed}")
 
     if len(layouts) == 2:
         for seed in selected:
@@ -160,6 +183,7 @@ def main():
         print(variant, json.dumps(summary[variant]["combined"]))
     if args.split == "parity":
         summary["identical_combat_reports_and_traces"] = len(jobs)
+        summary["identical_untraced_and_contact_probe_reports"] = len(jobs) * 2
         print(f"Parity passed in {len(jobs)} pairs")
     (root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 

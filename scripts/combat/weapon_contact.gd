@@ -5,7 +5,7 @@ const Robot = preload("res://scripts/combat/robot.gd")
 static func is_weapon(role: String) -> bool:
 	return role == "tooth" or role == "core"
 
-static func read_pair(bots: Array[RigidBody3D], delta: float) -> Dictionary:
+static func read_pair(bots: Array[RigidBody3D], delta: float, probe = null) -> Dictionary:
 	var hits: Array[Dictionary] = [{}, {}]
 	var touching := [false, false]
 	var clash: Dictionary = {}
@@ -21,7 +21,11 @@ static func read_pair(bots: Array[RigidBody3D], delta: float) -> Dictionary:
 			var other_weapon := is_weapon(contact.other_role)
 			if local_weapon or other_weapon:
 				weapon_depth = maxf(weapon_depth, float(contact.depth))
+				if probe != null and contact.depth >= 0.12:
+					probe.inspect_depth(own, other, contact)
 			if local_weapon and other_weapon:
+				if probe != null:
+					probe.observe_weapon("weapon_clash", own if own.kind == "saw" else other, contact)
 				var relative: Vector3 = contact.relative + _surface_motion(own, point) - _surface_motion(other, point)
 				var power := clampf((relative.length() * 0.27 + float(contact.strength)) / 6.4, 0.17, 0.91)
 				if power > float(clash.get("strength", 0.0)):
@@ -34,14 +38,29 @@ static func read_pair(bots: Array[RigidBody3D], delta: float) -> Dictionary:
 			touching[attacker_index] = true
 			var role: String = contact.local_role if local_weapon else contact.other_role
 			if role != "tooth":
+				if probe != null:
+					probe.observe_weapon("core_only", bots[attacker_index], contact)
 				continue
 			var attacker := bots[attacker_index] as Robot
 			var defender := bots[1 - attacker_index] as Robot
 			if not attacker.active or attacker.hp <= 0.0 or defender.hp <= 0.0:
+				if probe != null:
+					probe.observe_weapon("inactive", attacker, contact)
 				continue
 			if attacker.weapon_disabled or attacker.strike_latched or attacker.cooldown > 0.0 or attacker.rotor_speed < float(attacker.tune.weapon_speed) * 0.46:
+				if probe != null:
+					var reason := "slow_rotor"
+					if attacker.weapon_disabled:
+						reason = "weapon_disabled"
+					elif attacker.strike_latched:
+						reason = "contact_latched"
+					elif attacker.cooldown > 0.0:
+						reason = "cooldown"
+					probe.observe_weapon(reason, attacker, contact)
 				continue
 			if attacker.to_local(point).z > (-0.70 if attacker.kind == "saw" else -0.90):
+				if probe != null:
+					probe.observe_weapon("behind_reach", attacker, contact)
 				continue
 			var normal: Vector3 = contact.normal if local_weapon else -contact.normal
 			var spin := _surface_motion(attacker, point)
@@ -50,7 +69,11 @@ static func read_pair(bots: Array[RigidBody3D], delta: float) -> Dictionary:
 			var closing := maxf(0.0, -normal_speed)
 			var tangent := relative - normal * normal_speed
 			if closing < 0.42 and (tangent.length() < 3.7 or normal_speed > 1.1):
+				if probe != null:
+					probe.observe_weapon("glancing", attacker, contact)
 				continue
+			if probe != null:
+				probe.observe_weapon("eligible_tooth", attacker, contact)
 			var score := closing + tangent.length() * 0.24 + float(contact.strength) * 0.65
 			if score > float(hits[attacker_index].get("score", 0.0)):
 				var strength := clampf(score / (16.0 if attacker.kind == "saw" else 10.0), 0.23, 1.0)
