@@ -1,5 +1,18 @@
 # Robot art review
 
+## Bulldozer tracked review
+
+The tracked variant has 36 moving shoes per side around three road wheels, with the existing orange upper hull and spiked drum. Open [the tracked review scene](../scenes/review/bulldozer_tracks_review.tscn) in Godot and press **F6**. The track loop and its rotating parts are visual assemblies for this review. The match still loads Bulldozer v04.
+
+- [Editable Blender source](source/robots/bulldozer/bulldozer_v05_tracks.blend) · [Runtime review GLB](../assets/robots/bulldozer/bulldozer_v05_tracks.glb)
+- [Godot motion review](../renders/bulldozer-tracks/bulldozer-tracks.mp4) · [Close-up still](../renders/bulldozer-tracks/bulldozer-tracks.png)
+
+To reproduce the variant from the wheeled source, use the same Blender binary as the wheel-support builds below.
+
+```powershell
+& $blender -b art/source/robots/bulldozer/bulldozer_v04.blend --python-exit-code 1 --python tools/art/build_bulldozer_tracks.py
+```
+
 ## Wheel-support revisions
 
 Riptide v03 and Bulldozer v04 retain the same root, wheel pivots and weapon pivot. The chassis mesh includes the bearing carriers, collars, shafts, crossmembers and skids. Each wheel pivot owns its tire and rotating hub. See the [wheel-support validation](../qa/wheel-support/VALIDATION.md) for intact and detached views.

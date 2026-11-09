@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/art/robot_review.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/art/bulldozer_tracks_visual.gd" id="2"]
+
+[node name="BulldozerTracksReview" type="Node3D"]
+script = ExtResource("1")
+visual_script = ExtResource("2")
+title = "BULLDOZER / 02\nTRACKED MODEL REVIEW — SPIKED DRUM"
+weapon_speed = 3.0
+hero_camera = Vector3(8.6, 3.45, -7.15)
+orbit_speed = 0.16
+portrait = true

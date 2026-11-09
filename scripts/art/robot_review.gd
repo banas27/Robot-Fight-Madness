@@ -3,6 +3,9 @@ const Shapes = preload("res://scripts/shapes.gd")
 @export var visual_script: Script
 @export var title: String
 @export var weapon_speed := 0.0
+@export var hero_camera := Vector3(3.2, 3.1, -4.0)
+@export var orbit_speed := 0.0
+@export var portrait := false
 var visual: Node3D
 var camera: Camera3D
 var angle := 0.0
@@ -12,7 +15,7 @@ var frames := 0
 var quit_after_capture := false
 
 func _ready() -> void:
-	get_window().content_scale_size = Vector2i(1200, 900)
+	get_window().content_scale_size = Vector2i(720, 1280) if portrait else Vector2i(1200, 900)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--screenshot="):
 			screenshot_path = arg.trim_prefix("--screenshot=")
@@ -46,19 +49,23 @@ func _ready() -> void:
 	add_child(camera)
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 3.1
-	camera.position = Vector3(3.2, 3.1, -4.0)
+	if portrait:
+		camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.position = hero_camera
 	camera.look_at(Vector3(0, 0.35, -0.25))
 	camera.current = true
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var heading := Label.new()
 	heading.text = title
-	heading.position = Vector2(40, 28)
-	heading.add_theme_font_size_override("font_size", 23)
+	heading.position = Vector2(40, 238 if portrait else 28)
+	heading.add_theme_font_size_override("font_size", 27 if portrait else 23)
 	layer.add_child(heading)
 	var footer := Label.new()
 	footer.text = "GLB IN GODOT  |  1 unit = 1 meter  |  Powder coat / graphite / steel\nSpace: motion on/off   •   Left / Right: orbit   •   1: hero   2: top   3: front   •   Esc: close"
-	footer.position = Vector2(40, 812)
+	footer.position = Vector2(40, 945 if portrait else 812)
+	if portrait:
+		footer.text = "GLB IN GODOT   /   1 UNIT = 1 METER\nSpace: pause   •   ← / →: orbit   •   1 / 2 / 3: views"
 	footer.add_theme_font_size_override("font_size", 17)
 	footer.modulate = Color("b2c7d2")
 	layer.add_child(footer)
@@ -69,6 +76,8 @@ func _process(delta: float) -> void:
 	if not paused and screenshot_path == "":
 		angle += delta * weapon_speed
 		visual.update_visual(delta, angle, 0.3, 0.0)
+		if not is_zero_approx(orbit_speed):
+			visual.rotate_y(delta * orbit_speed)
 	if Input.is_physical_key_pressed(KEY_LEFT):
 		visual.rotate_y(delta)
 	if Input.is_physical_key_pressed(KEY_RIGHT):
@@ -85,7 +94,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_ESCAPE: get_tree().quit()
 			KEY_SPACE: paused = not paused
-			KEY_1: camera.position = Vector3(3.2, 3.1, -4.0)
+			KEY_1: camera.position = hero_camera
 			KEY_2: camera.position = Vector3(0, 6, -0.249)
 			KEY_3: camera.position = Vector3(0, 1.2, -5)
 		camera.look_at(Vector3(0, 0.35, -0.25))
