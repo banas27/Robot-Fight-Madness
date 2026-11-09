@@ -1,5 +1,7 @@
 # Riptide flank and escape evaluation
 
+The later rail escape experiment has its own [evaluation and replay commands](experiment-02/VALIDATION.md).
+
 **Keep the baseline active.** On the reserved seeds, the candidate turned more committed passes into actual side hits and separated more often. It dealt 15.8 less HP damage per fight, spent longer near the drum at low speed, and spent over three times as long in physical rail pins. The win count was the same. The overall exchange does not justify switching the default or changing the robot stats.
 
 | Riptide metric | Development baseline | Development candidate | Evaluation baseline | Evaluation candidate |

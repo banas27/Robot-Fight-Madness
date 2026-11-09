@@ -55,3 +55,5 @@ Keep speeds and cooldowns positive. The fits in `scripts/combat/collision_fit.gd
 Current clips and measured results are in [R08 validation](qa/episode-pass/VALIDATION.md). See [Robot art review](art/REVIEW.md) for Blender sources and asset export instructions.
 
 Run the [Riptide AI comparison](qa/riptide-ai/VALIDATION.md) with `py tools/evaluate_riptide.py --godot $godot --split development --output qa/riptide-ai/development`. The default fight uses the baseline policy. Pass `-RiptideAI candidate` to `Record-Fight.ps1` to record the alternate policy.
+
+Pass `-RiptideAI rail-exit` to record the rail escape experiment. See its [results and replay commands](qa/riptide-ai/experiment-02/VALIDATION.md).
