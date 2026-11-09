@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/art/robot_review.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/art/riptide_visual.gd" id="2"]
+
+[node name="RiptideReview" type="Node3D"]
+script = ExtResource("1")
+visual_script = ExtResource("2")
+title = "RIPTIDE / 01\nSTYLIZED INDUSTRIAL — CIRCULAR SAW"
+weapon_speed = 2.0

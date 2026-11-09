@@ -1,0 +1,14 @@
+{
+  "episode": {
+    "intro_shot_seconds": 5.0,
+    "fight_seconds": 25.0,
+    "showcase_seconds": 5.0
+  },
+  "camera_min_width": 8.9,
+  "camera_max_width": 13.1,
+  "camera_max_shake": 0.087,
+  "spark_pool": 72,
+  "debris_pool": 20,
+  "smoke_pool": 16,
+  "impact_volume_db": -9.0
+}

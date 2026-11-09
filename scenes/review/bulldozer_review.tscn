@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/art/robot_review.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/art/bulldozer_visual.gd" id="2"]
+
+[node name="BulldozerReview" type="Node3D"]
+script = ExtResource("1")
+visual_script = ExtResource("2")
+title = "BULLDOZER / 02\nSTYLIZED INDUSTRIAL — SPIKED DRUM"
+weapon_speed = 3.0
