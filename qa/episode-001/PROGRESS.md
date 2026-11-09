@@ -8,3 +8,4 @@
 - The combined development pairing averaged 4.41 seconds of Riptide stalls and 13 recovery links. The new policies and confirmation criteria are frozen for comparison on fresh seeds.
 - Fresh confirmation completed all 160 fights. Adopt tracked-peel for the two exports. Keep frozen tracked-intercept as its opponent. The alternative pressure policy missed its ineffective-push and conversion gates and remains reproducible from the experiment freeze.
 - Two improvement rounds used. Screen the known development fights for primary and backup footage, then verify the two resulting MP4s.
+- Final selection is the primary episode from swapped seed 4773270, with swapped seed 6990406 as the backup. Both passed full decode and headless parity, and the key damage sequences were sampled at frame resolution. The remaining step is the owner's phone viewing and listening approval.
