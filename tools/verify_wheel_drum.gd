@@ -2,6 +2,7 @@ extends SceneTree
 ## Query and solve the captured two-shape poses without the other combat
 ## shapes, deck or prior contact cache. Every pair starts from the same pose.
 const Audit = preload("res://scripts/combat/contact_audit.gd")
+const Robot = preload("res://scripts/combat/robot.gd")
 const CASES := ["candidate-166-swapped", "rail-exit-15", "rail-exit-4"]
 
 class ProbeBody extends RigidBody3D:
@@ -41,18 +42,24 @@ func run() -> void:
 				break
 		assert(not frame.is_empty())
 		var specs: Array = audit.shapes
-		var controls := await check_controls(specs)
-		if controls.is_empty():
+		var fixed_hub := project_hub(specs[0])
+		var controls := await check_controls(specs, null)
+		var fixed_controls := await check_controls(specs, fixed_hub)
+		if controls.is_empty() or fixed_controls.is_empty():
 			quit(1)
 			return
-		var input := await trial(specs, frame.solver_input.bodies, false, false)
-		var published := await trial(specs, frame.published.bodies, false, false)
+		var input := await trial(specs, frame.solver_input.bodies, null, false)
+		var published := await trial(specs, frame.published.bodies, null, false)
 		assert(input.overlap_before == frame.solver_input.wheel_query)
 		assert(published.overlap_before == frame.published.wheel_query)
 		assert(input.overlap_before and published.overlap_before == (case != "rail-exit-4"))
-		var cylinder := await trial(specs, frame.solver_input.bodies, false, true)
-		var faceted := await trial(specs, frame.solver_input.bodies, true, true)
-		evidence[case] = {"tick": frame.tick, "controls": controls, "input_query": input.overlap_before,
+		var cylinder := await trial(specs, frame.solver_input.bodies, null, true)
+		var faceted := await trial(specs, frame.solver_input.bodies, fixed_hub, true)
+		assert(peak_projection(cylinder) > 0.16, "Original witness spike did not reproduce for " + case)
+		assert(peak_projection(faceted) < 0.025, "Revised hub generated a deep witness for " + case)
+		assert(vector(faceted.response[0].displacement).length() < 0.02, "Revised hub pushed the wheel body too far in one tick.")
+		evidence[case] = {"tick": frame.tick, "controls": controls, "revised_controls": fixed_controls,
+			"input_query": input.overlap_before,
 			"published_query": published.overlap_before, "isolated_cylinder": cylinder, "isolated_prism": faceted}
 	if not output.is_empty():
 		var file := FileAccess.open(output, FileAccess.WRITE)
@@ -61,25 +68,47 @@ func run() -> void:
 	print("RFS_WHEEL_DRUM_FIXTURES_COMPLETE")
 	quit()
 
-func check_controls(specs: Array) -> Dictionary:
+func project_hub(spec: Dictionary) -> Shape3D:
+	var config: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config/combat.json"))
+	var bot := Robot.new()
+	bot.configure("saw", config, 0.0, false)
+	var index := int(spec.shape_index)
+	var owner := bot.shape_find_owner(index)
+	var shape := bot.shape_owner_get_shape(owner, 0) as ConvexPolygonShape3D
+	assert(bot.role_for_shape(index) == "wheel" and shape != null and shape.points.size() == 64)
+	assert(is_equal_approx(shape.margin, spec.margin))
+	for point in shape.points:
+		assert(is_equal_approx(Vector2(point.x, point.z).length(), spec.radius))
+		assert(is_equal_approx(absf(point.y) * 2.0, spec.height))
+	bot.free()
+	return shape
+
+func peak_projection(trial_result: Dictionary) -> float:
+	var peak := 0.0
+	for body in trial_result.witnesses:
+		for witness in body:
+			peak = maxf(peak, witness.projection_m)
+	return peak
+
+func check_controls(specs: Array, hub: Shape3D) -> Dictionary:
 	var ident := Audit.pack_transform(Transform3D.IDENTITY)
 	var wheel := {"body_world": ident, "shape_local": ident, "linear_velocity": [0, 0.10, 0], "angular_velocity": [0, 0, 0]}
 	var drum := wheel.duplicate()
 	drum.linear_velocity = [0, 0, 0]
 	drum.body_world = Audit.pack_transform(Transform3D(Basis.IDENTITY, Vector3(0.50, 0.0, 0.0)))
-	var separated := await trial(specs, [wheel, drum], false, true)
+	var separated := await trial(specs, [wheel, drum], hub, true)
 	if separated.overlap_before or not separated.witnesses[0].is_empty():
 		push_error("Separated fixture returned a contact.")
 		return {}
 	var drum_half_height: float = specs[1].bounds[1][1]
 	drum.body_world = Audit.pack_transform(Transform3D(Basis.IDENTITY, Vector3(0.04, drum_half_height + 0.01, 0.0)))
-	var intersecting := await trial(specs, [wheel, drum], false, true)
+	var intersecting := await trial(specs, [wheel, drum], hub, true)
 	if not intersecting.overlap_before or intersecting.witnesses[0].is_empty():
 		push_error("Intersecting fixture did not report a contact: %s" % intersecting)
 		return {}
 	return {"separated": separated, "deliberate_intersection": intersecting}
 
-func trial(specs: Array, poses: Array, faceted: bool, solve: bool) -> Dictionary:
+func trial(specs: Array, poses: Array, hub: Shape3D, solve: bool) -> Dictionary:
 	await physics_frame
 	var stage := Node3D.new()
 	root.add_child(stage)
@@ -99,7 +128,7 @@ func trial(specs: Array, poses: Array, faceted: bool, solve: bool) -> Dictionary
 		body.center_of_mass = vector(spec.center_of_mass)
 		body.transform = unpack(pose.body_world)
 		var collider := CollisionShape3D.new()
-		collider.shape = make_shape(spec, faceted and i == 0)
+		collider.shape = hub if hub != null and i == 0 else make_shape(spec)
 		collider.transform = unpack(pose.shape_local)
 		body.add_child(collider)
 		stage.add_child(body)
@@ -130,8 +159,8 @@ func pair_query(bodies: Array[ProbeBody]) -> bool:
 	assert(wheel == drum, "Pair queries disagreed about the intersection.")
 	return wheel
 
-func make_shape(spec: Dictionary, faceted: bool) -> Shape3D:
-	if spec.type == "CylinderShape3D" and not faceted:
+func make_shape(spec: Dictionary) -> Shape3D:
+	if spec.type == "CylinderShape3D":
 		var cylinder := CylinderShape3D.new()
 		cylinder.radius = spec.radius
 		cylinder.height = spec.height
@@ -139,14 +168,8 @@ func make_shape(spec: Dictionary, faceted: bool) -> Shape3D:
 		return cylinder
 	var hull := ConvexPolygonShape3D.new()
 	var points := PackedVector3Array()
-	if faceted:
-		for y in [-float(spec.height) * 0.5, float(spec.height) * 0.5]:
-			for i in range(32):
-				var angle := TAU * i / 32.0
-				points.append(Vector3(float(spec.radius) * cos(angle), y, float(spec.radius) * sin(angle)))
-	else:
-		for point in spec.points:
-			points.append(vector(point))
+	for point in spec.points:
+		points.append(vector(point))
 	hull.points = points
 	hull.margin = spec.margin
 	return hull

@@ -26,7 +26,12 @@ static func install(bot) -> void:
 			else:
 				_cylinder(bot, "wheel", axle, 0.294, 0.218, AXIAL)
 			var hub: Vector3 = axle + Vector3.RIGHT * side * (0.132 if saw else 0.117)
-			_cylinder(bot, "wheel", hub, 0.108 if saw else 0.097, 0.058 if saw else 0.041, AXIAL)
+			if saw:
+				# Use explicit rim and cap faces where the drum crosses the
+				# hub. GodotPhysics can pick a far cap witness for the cylinder.
+				_round_prism(bot, "wheel", hub, 0.108, 0.058, AXIAL)
+			else:
+				_cylinder(bot, "wheel", hub, 0.097, 0.041, AXIAL)
 	bot.rotor_owner = bot.create_shape_owner(bot)
 	bot.shape_roles[bot.rotor_owner] = "tooth"
 	if saw:
