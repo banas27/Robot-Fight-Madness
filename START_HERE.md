@@ -55,3 +55,5 @@ Keep speeds and cooldowns positive. The fits in `scripts/combat/collision_fit.gd
 Current clips and measured results are in [R08 validation](qa/episode-pass/VALIDATION.md). See [Robot art review](art/REVIEW.md) for Blender sources and asset export instructions.
 
 Run the [Riptide AI comparison](qa/riptide-ai/VALIDATION.md) with `py tools/evaluate_riptide.py --godot $godot --split development --output qa/riptide-ai/development`. The default fight uses the baseline policy. Pass `-RiptideAI candidate` to `Record-Fight.ps1` to record the alternate policy.
+
+The [wheel and drum investigation](qa/wheel-drum/VALIDATION.md) records the hub collider change, same-pose fixtures, and updated baseline episodes.

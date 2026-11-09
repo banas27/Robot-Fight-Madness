@@ -4,6 +4,7 @@ extends SceneTree
 const Audit = preload("res://scripts/combat/contact_audit.gd")
 const Robot = preload("res://scripts/combat/robot.gd")
 const CASES := ["candidate-166-swapped", "rail-exit-15", "rail-exit-4"]
+var query_disagreement := false
 
 class ProbeBody extends RigidBody3D:
 	var witnesses: Array[Dictionary] = []
@@ -23,7 +24,7 @@ func _initialize() -> void:
 
 func run() -> void:
 	Engine.physics_ticks_per_second = 180
-	var source := "res://qa/wheel-drum/phase"
+	var source := "res://qa/wheel-drum/extended"
 	var output := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--capture-dir="):
@@ -33,16 +34,23 @@ func run() -> void:
 	var evidence: Dictionary = {}
 	for case in CASES:
 		var capture = JSON.parse_string(FileAccess.get_file_as_string(source.path_join(case + ".trace.json")))
-		assert(capture is Dictionary and capture.has("wheel_drum"), "Missing phase capture for " + case)
+		if not capture is Dictionary or not capture.has("wheel_drum"):
+			fail("Missing phase capture for " + case)
+			return
 		var audit: Dictionary = capture.wheel_drum
 		var frame: Dictionary
 		for item in audit.samples:
 			if int(item.tick) == int(audit.center_tick):
 				frame = item
 				break
-		assert(not frame.is_empty())
+		if frame.is_empty():
+			fail("Missing original solver input for " + case)
+			return
 		var specs: Array = audit.shapes
 		var fixed_hub := project_hub(specs[0])
+		if fixed_hub == null:
+			fail("Missing revised project hub for " + case)
+			return
 		var controls := await check_controls(specs, null)
 		var fixed_controls := await check_controls(specs, fixed_hub)
 		if controls.is_empty() or fixed_controls.is_empty():
@@ -50,23 +58,35 @@ func run() -> void:
 			return
 		var input := await trial(specs, frame.solver_input.bodies, null, false)
 		var published := await trial(specs, frame.published.bodies, null, false)
-		assert(input.overlap_before == frame.solver_input.wheel_query)
-		assert(published.overlap_before == frame.published.wheel_query)
-		assert(input.overlap_before and published.overlap_before == (case != "rail-exit-4"))
+		if not input.overlap_before or input.overlap_before != frame.solver_input.wheel_query \
+			or published.overlap_before != frame.published.wheel_query \
+			or published.overlap_before != (case != "rail-exit-4"):
+			fail("Isolated query disagreed with the captured phase for " + case)
+			return
 		var cylinder := await trial(specs, frame.solver_input.bodies, null, true)
 		var faceted := await trial(specs, frame.solver_input.bodies, fixed_hub, true)
-		assert(peak_projection(cylinder) > 0.16, "Original witness spike did not reproduce for " + case)
-		assert(peak_projection(faceted) < 0.025, "Revised hub generated a deep witness for " + case)
-		assert(vector(faceted.response[0].displacement).length() < 0.02, "Revised hub pushed the wheel body too far in one tick.")
+		if peak_projection(cylinder) <= 0.16 or peak_projection(faceted) >= 0.025 \
+			or vector(faceted.response[0].displacement).length() >= 0.02:
+			fail("Same-pose witness or displacement outside the regression bounds for " + case)
+			return
 		evidence[case] = {"tick": frame.tick, "controls": controls, "revised_controls": fixed_controls,
 			"input_query": input.overlap_before,
 			"published_query": published.overlap_before, "isolated_cylinder": cylinder, "isolated_prism": faceted}
+	if query_disagreement:
+		fail("Pair queries disagreed about the intersection.")
+		return
 	if not output.is_empty():
 		var file := FileAccess.open(output, FileAccess.WRITE)
-		assert(file != null, "Could not write fixture evidence.")
+		if file == null:
+			fail("Could not write fixture evidence.")
+			return
 		file.store_string(JSON.stringify(evidence, "\t") + "\n")
 	print("RFS_WHEEL_DRUM_FIXTURES_COMPLETE")
 	quit()
+
+func fail(message: String) -> void:
+	push_error(message)
+	quit(1)
 
 func project_hub(spec: Dictionary) -> Shape3D:
 	var config: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config/combat.json"))
@@ -75,12 +95,14 @@ func project_hub(spec: Dictionary) -> Shape3D:
 	var index := int(spec.shape_index)
 	var owner := bot.shape_find_owner(index)
 	var shape := bot.shape_owner_get_shape(owner, 0) as ConvexPolygonShape3D
-	assert(bot.role_for_shape(index) == "wheel" and shape != null and shape.points.size() == 64)
-	assert(is_equal_approx(shape.margin, spec.margin))
-	for point in shape.points:
-		assert(is_equal_approx(Vector2(point.x, point.z).length(), spec.radius))
-		assert(is_equal_approx(absf(point.y) * 2.0, spec.height))
+	var is_wheel := bot.role_for_shape(index) == "wheel"
 	bot.free()
+	if not is_wheel or shape == null or shape.points.size() != 64 or not is_equal_approx(shape.margin, spec.margin):
+		return null
+	for point in shape.points:
+		if not is_equal_approx(Vector2(point.x, point.z).length(), spec.radius) \
+			or not is_equal_approx(absf(point.y) * 2.0, spec.height):
+			return null
 	return shape
 
 func peak_projection(trial_result: Dictionary) -> float:
@@ -156,7 +178,7 @@ func trial(specs: Array, poses: Array, hub: Shape3D, solve: bool) -> Dictionary:
 func pair_query(bodies: Array[ProbeBody]) -> bool:
 	var wheel := Audit.intersects(bodies[0], 0, bodies[1], 0)
 	var drum := Audit.intersects(bodies[1], 0, bodies[0], 0)
-	assert(wheel == drum, "Pair queries disagreed about the intersection.")
+	query_disagreement = query_disagreement or wheel != drum
 	return wheel
 
 func make_shape(spec: Dictionary) -> Shape3D:
