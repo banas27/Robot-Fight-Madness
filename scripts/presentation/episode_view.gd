@@ -123,11 +123,11 @@ func _process(_delta: float) -> void:
 			_load_result(match_node.result_snapshot)
 		shot_time = match_node.result_elapsed
 		if shot >= 0:
-			models[shot].rotation.y = 0.10 - TURN_RATE * shot_time
+			_turn_result(shot, 0.10 - TURN_RATE * shot_time)
 		else:
 			var turn := 0.34 + TURN_RATE * 0.75 * shot_time
-			models[0].rotation.y = turn
-			models[1].rotation.y = -turn
+			_turn_result(0, turn)
+			_turn_result(1, -turn)
 	else:
 		var span: float = match_node.intro_shot_seconds
 		var index := 1 if match_node.elapsed + 0.000001 >= span else 0
@@ -154,6 +154,8 @@ func _load_result(snapshot: Dictionary) -> void:
 	for i in range(models.size()):
 		var state: Dictionary = snapshot.robots[i]
 		var visual := models[i]
+		visual.position.y = state.pedestal_height
+		visual.basis = state.tilt
 		visual.show_damage(state.armor_damage, state.wheel_states, state.weapon_damage, state.weapon_disabled)
 		visual.update_visual(0.0, state.rotor_angle, 0.0, 0.0, 0.0, state.hp <= 0.0)
 		for wheel in range(visual.wheel_pivots.size()):
@@ -161,6 +163,9 @@ func _load_result(snapshot: Dictionary) -> void:
 			pivot.visible = state.wheel_states[wheel] != CombatRobot.Wheel.DETACHED
 			if pivot.visible:
 				pivot.basis = state.wheel_bases[wheel]
+
+func _turn_result(index: int, yaw: float) -> void:
+	models[index].basis = Basis(Vector3.UP, yaw) * match_node.result_snapshot.robots[index].tilt
 
 static func reveal(time: float, at: float) -> float:
 	if time + 0.000001 < at:

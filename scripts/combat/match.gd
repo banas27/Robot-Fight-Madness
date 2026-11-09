@@ -31,6 +31,11 @@ var scrape_wait := [0.0, 0.0]
 var world_impacts := {"bump": 0, "scrape": 0, "clash": 0, "shutdown": 0}
 var peak_lift := 0.0
 var lowest_root := INF
+var min_detached_clearance := INF
+var max_detached_tilt := 0.0
+var deep_deck_run := [0, 0]
+var max_deep_deck_ticks := 0
+var unsupported_stall := [0.0, 0.0]
 var close_run := 0.0
 var longest_close_run := 0.0
 var wall_bumps := 0
@@ -274,11 +279,19 @@ func _physics_process(delta: float) -> void:
 		return
 	for i in range(2):
 		var bot := bots[i] as CombatRobot
-		bot.step(delta, radius)
 		peak_speed = maxf(peak_speed, bot.linear_velocity.length())
 		peak_lift = maxf(peak_lift, bot.position.y - 0.40)
 		lowest_root = minf(lowest_root, bot.position.y)
+		if bot.detached_wheel_count > 0:
+			var clearance := bot.position.y + Fit.lowest_surface_y(bot, bot.global_basis)
+			min_detached_clearance = minf(min_detached_clearance, clearance)
+			max_detached_tilt = maxf(max_detached_tilt, rad_to_deg(Vector3.UP.angle_to(bot.global_basis.y)))
+			deep_deck_run[i] = int(deep_deck_run[i]) + 1 if clearance < -0.025 else 0
+			max_deep_deck_ticks = maxi(max_deep_deck_ticks, deep_deck_run[i])
+			if bot.supported_drive_grip() == 0.0 and bot.linear_velocity.slide(Vector3.UP).length() < 0.25:
+				unsupported_stall[i] += delta
 		max_extent = maxf(max_extent, maxf(absf(bot.position.x) / radius.x, absf(bot.position.z) / radius.y))
+		bot.step(delta, radius)
 		if impact_fx != null and bot.hp < bot.max_hp * 0.24:
 			smoke_wait[i] = float(smoke_wait[i]) - delta
 			if float(smoke_wait[i]) <= 0.0:
@@ -355,11 +368,13 @@ func _capture_result() -> void:
 			drive = "Partial failure · %d/4 drives" % bot.failed_wheel_count
 		elif bot.drive_grip() < 1.0:
 			drive = "Damaged"
+		var yaw := Vector3.FORWARD.signed_angle_to(CombatRobot.deck_forward(bot.global_basis), Vector3.UP)
+		var tilt := (Basis(Vector3.UP, -yaw) * bot.global_basis).orthonormalized()
 		var condition := {"name": String(bot.name), "color": bot.team_color,
 			"hp": final_hp[i], "max_hp": bot.max_hp, "ratio": final_ratio[i],
 			"armor_damage": bot.armor_damage, "wheel_states": wheel_states, "wheel_bases": wheel_bases,
 			"weapon_damage": bot.weapon_damage, "weapon_disabled": bot.weapon_disabled, "rotor_angle": bot.rotor_angle,
-			"weapon": weapon, "drive": drive}
+			"weapon": weapon, "drive": drive, "tilt": tilt, "pedestal_height": -Fit.lowest_surface_y(bot, tilt)}
 		condition.make_read_only()
 		records.append(condition)
 	records.make_read_only()
@@ -512,6 +527,9 @@ func _write_report() -> void:
 		"max_hp": [bots[0].max_hp, bots[1].max_hp], "remaining_ratio": final_ratio,
 		"hits": [bots[0].hit_count, bots[1].hit_count], "recoveries": [bots[0].recovery_count, bots[1].recovery_count],
 		"peak_speed": peak_speed, "max_arena_extent_ratio": max_extent, "peak_lift": peak_lift, "lowest_root": lowest_root,
+		"min_detached_deck_clearance": min_detached_clearance if is_finite(min_detached_clearance) else null,
+		"max_detached_tilt_deg": max_detached_tilt, "unsupported_stall_seconds": unsupported_stall,
+		"max_deep_deck_ticks": max_deep_deck_ticks,
 		"events": events, "other_impacts": world_impacts, "wall_bumps": wall_bumps,
 		"longest_close_run": longest_close_run, "peak_particles": 0, "peak_voices": 0,
 		"physics_hz": Engine.physics_ticks_per_second, "peak_weapon_contact_depth": peak_weapon_depth,

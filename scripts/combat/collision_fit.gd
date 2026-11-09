@@ -1,11 +1,12 @@
 extends RefCounted
-## Dimensions follow the v02 Riptide and v03 Bulldozer GLB build profiles.
+## Dimensions follow the Riptide and Bulldozer GLB build profiles.
 ## Stationary supports are separate from the axle owner that carries the teeth.
 const BODY := 1
 const WALL := 2
 const DECK := 4
 const AXIAL := Basis(Vector3.BACK, PI * 0.5)
 const MARGIN := 0.002
+static var wheel_support: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config/wheel_support.json"))
 
 static func install(bot) -> void:
 	var saw: bool = bot.kind == "saw"
@@ -39,6 +40,41 @@ static func install(bot) -> void:
 	else:
 		_drum_weapon(bot)
 	bot.sync_weapon_shapes()
+	_install_wheel_support(bot, 0.43 if saw else 0.433)
+
+static func _install_wheel_support(bot, axle_z: float) -> void:
+	var fit: Dictionary = wheel_support[bot.kind]
+	var skid: Array = fit.skid_center
+	var bearing: Array = fit.bearing_center
+	for side in [-1.0, 1.0]:
+		_box(bot, "chassis", Vector3(side * skid[0], skid[1], skid[2]), _dimensions(fit.skid_size))
+		for end in [-1.0, 1.0]:
+			_box(bot, "chassis", Vector3(side * bearing[0], bearing[1], end * axle_z), _dimensions(fit.bearing_size))
+
+static func _dimensions(values: Array) -> Vector3:
+	return Vector3(values[0], values[1], values[2])
+
+# Bottom of the installed solid geometry relative to the chassis origin.
+static func lowest_surface_y(bot, orientation: Basis) -> float:
+	var lowest := INF
+	var chassis := Transform3D(orientation, Vector3.ZERO)
+	for owner in bot.get_shape_owners():
+		if bot.is_shape_owner_disabled(owner):
+			continue
+		var pose: Transform3D = chassis * bot.shape_owner_get_transform(owner)
+		for i in range(bot.shape_owner_get_shape_count(owner)):
+			var shape: Shape3D = bot.shape_owner_get_shape(owner, i)
+			if shape is BoxShape3D:
+				var vertical := Vector3(pose.basis.x.y, pose.basis.y.y, pose.basis.z.y).abs()
+				lowest = minf(lowest, pose.origin.y - vertical.dot(shape.size) * 0.5)
+			elif shape is CylinderShape3D:
+				var axis_y := absf(pose.basis.y.y)
+				var reach: float = shape.height * 0.5 * axis_y + shape.radius * sqrt(maxf(0.0, 1.0 - axis_y * axis_y))
+				lowest = minf(lowest, pose.origin.y - reach)
+			elif shape is ConvexPolygonShape3D:
+				for point: Vector3 in shape.points:
+					lowest = minf(lowest, (pose * point).y)
+	return lowest
 
 static func _saw_body(bot) -> void:
 	var footprint := PackedVector2Array([Vector2(-0.49,-0.64), Vector2(0.49,-0.64), Vector2(0.595,-0.20),

@@ -77,6 +77,8 @@ def metrics(match, trace):
         "weapon_hits": len(hits),
         "side_rear_hits": sum(hit["zone"] != "front" for hit in hits),
         "stalled_s": saw["stalled_s"], "pin_s": saw["pin_s"],
+        "bulldozer_stalled_s": trace["robots"][1]["stalled_s"],
+        "bulldozer_pin_s": trace["robots"][1]["pin_s"],
         "recoveries": len(saw["recoveries"]),
         "separated": sum(r["separated"] for r in saw["recoveries"]),
         "sustained_exits": sum(r.get("sustained", False) for r in saw["recoveries"]),
@@ -91,6 +93,11 @@ def metrics(match, trace):
         "deep_contact_s": match["longest_weapon_depth_over_25mm"],
         "peak_speed": match["peak_speed"], "peak_lift": match["peak_lift"],
         "lowest_root": match["lowest_root"], "arena_extent": match["max_arena_extent_ratio"],
+        "min_detached_deck_clearance": match.get("min_detached_deck_clearance"),
+        "max_deep_deck_ticks": match.get("max_deep_deck_ticks", 0),
+        "max_detached_tilt_deg": match.get("max_detached_tilt_deg", 0.0),
+        "unsupported_stall_seconds": match.get("unsupported_stall_seconds", [0, 0]),
+        "wheel_detachments": sum(event["kind"] == "wheel_detached" for event in match["component_events"]),
     }
 
 
@@ -100,7 +107,10 @@ def solver_outliers(rows):
     flagged = []
     for row in rows:
         failures = {key: row[key] for key, limit in limits.items() if row[key] >= limit}
-        if row["lowest_root"] <= .32:
+        clearance = row["min_detached_deck_clearance"]
+        if clearance is not None and clearance <= -.025:
+            failures["min_detached_deck_clearance"] = clearance
+        elif clearance is None and row["lowest_root"] <= .32:
             failures["lowest_root"] = row["lowest_root"]
         if failures:
             flagged.append({"seed": row["seed"], "start": row["start"], "metrics": failures})
@@ -111,12 +121,20 @@ def aggregate(rows):
     mean = lambda key: round(statistics.mean(r[key] for r in rows), 3)
     total = lambda key: sum(r[key] for r in rows)
     max_metric = lambda key: round(max(r[key] for r in rows), 4)
+    clearances = [r["min_detached_deck_clearance"] for r in rows if r["min_detached_deck_clearance"] is not None]
     return {
         "matches": len(rows),
         "wins": sum(r["winner"] == "RIPTIDE" for r in rows),
+        "bulldozer_wins": sum(r["winner"] == "BULLDOZER" for r in rows),
         "draws": sum(r["winner"] == "DRAW" for r in rows),
         "mean_hp_percent": [round(statistics.mean(r["hp_percent"][i] for r in rows), 3) for i in range(2)],
         **{key: mean(key) for key in ("damage_dealt", "damage_received", "stalled_s", "pin_s", "retreat_s", "fight_s")},
+        **{key: mean(key) for key in ("bulldozer_stalled_s", "bulldozer_pin_s")},
+        "wheel_detachments": total("wheel_detachments"),
+        "unsupported_stall_seconds": [round(sum(r["unsupported_stall_seconds"][i] for r in rows), 3) for i in range(2)],
+        "max_detached_tilt_deg": max_metric("max_detached_tilt_deg"),
+        "max_deep_deck_ticks": max(r["max_deep_deck_ticks"] for r in rows),
+        "min_detached_deck_clearance": round(min(clearances), 4) if clearances else None,
         **{key: total(key) for key in ("attack_attempts", "successful_attempts", "flank_conversions",
                                        "intended_flanks", "intended_flank_conversions", "weapon_hits",
                                        "side_rear_hits", "recoveries", "separated", "sustained_exits",

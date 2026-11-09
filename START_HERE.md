@@ -57,3 +57,5 @@ Current clips and measured results are in [R08 validation](qa/episode-pass/VALID
 Run the [Riptide AI comparison](qa/riptide-ai/VALIDATION.md) with `py tools/evaluate_riptide.py --godot $godot --split development --output qa/riptide-ai/development`. The default fight uses the baseline policy. Pass `-RiptideAI candidate` to `Record-Fight.ps1` to record the alternate policy.
 
 The [wheel and drum investigation](qa/wheel-drum/VALIDATION.md) records the hub collider change, same-pose fixtures, and updated baseline episodes.
+
+The [wheel-support experiment](qa/wheel-support/VALIDATION.md) records the revised models, forced wheel-loss fixtures, seeded comparison and review videos.

@@ -98,7 +98,13 @@ def main():
             assert data['winner'] == expected, data
             summary = {k: data[k] for k in ('seed','winner','duration','hits','recoveries','max_arena_extent_ratio')}
             if solver or data['version'] == 'R02':
-                assert .32 < data['lowest_root'] and data['peak_lift'] < .26 and data['peak_speed'] < 8, data
+                clearance = data.get('min_detached_deck_clearance')
+                if clearance is None:
+                    assert data['lowest_root'] > .32, data
+                else:
+                    # Root height changes as missing supports let the chassis lean.
+                    assert math.isfinite(clearance) and data['max_deep_deck_ticks'] <= 3, data
+                assert data['peak_lift'] < .26 and data['peak_speed'] < 8, data
                 for key in ('peak_lift', 'lowest_root', 'longest_close_run', 'wall_bumps', 'other_impacts'):
                     summary[key] = data[key]
             if solver:

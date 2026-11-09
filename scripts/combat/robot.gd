@@ -1,5 +1,5 @@
 extends RigidBody3D
-## Compound chassis with gravity, a low centre of mass and yaw-only dynamics.
+## Compound chassis with a low centre of mass and free tilt after wheel loss.
 const SawArt = preload("res://scripts/art/riptide_visual.gd")
 const DrumArt = preload("res://scripts/art/bulldozer_visual.gd")
 const RobotArt = preload("res://scripts/art/robot_visual.gd")
@@ -30,7 +30,8 @@ var collision_angle := 0.0
 var rotor_speed := 0.0
 var flash := 0.0
 var contacts: Array[Dictionary] = []
-var grounded := false
+var supported_wheels := 0
+var deck_contact_roles: Dictionary = {}
 enum Maneuver { LINE_UP, ATTACK, RECOVER, REPOSITION, GUARD, PRESS, HOLD, EVADE, RAM_PRESS, BRAKE }
 enum Capability { ARMED, UNARMED, OPEN_TARGET, NO_DRIVE }
 enum Wheel { INTACT, WORN, SEVERE, DRIVE_FAILED, DETACHED }
@@ -83,6 +84,7 @@ var armor_damage := 0.0
 var wheel_damage := [0.0, 0.0, 0.0, 0.0]
 var wheel_state := [0, 0, 0, 0]
 var failed_wheel_count := 0
+var detached_wheel_count := 0
 var traction := 1.0
 var impact_unload := 0.0
 var weapon_damage := 0.0
@@ -150,7 +152,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	contacts.clear()
 	if audit_local_shape >= 0:
 		audit_witnesses.clear()
-	grounded = false
+	supported_wheels = 0
+	deck_contact_roles.clear()
 	wall_contact = false
 	opponent_contact = false
 	for i in range(state.get_contact_count()):
@@ -158,7 +161,12 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		if other == null:
 			continue
 		if other.collision_layer == Fit.DECK:
-			grounded = true
+			if state.get_contact_local_normal(i).y > 0.5:
+				var index := state.get_contact_local_shape(i)
+				var role := role_for_shape(index)
+				deck_contact_roles[role] = true
+				if role == "wheel":
+					supported_wheels |= 1 << wheel_for_shape(index)
 			continue
 		var here := state.get_contact_local_position(i)
 		var there := state.get_contact_collider_position(i)
@@ -185,6 +193,12 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			"local_role": role_for_shape(local_shape), "other_role": other_role, "local_shape": local_shape, "other_shape": other_shape,
 			"other_id": other.get_instance_id(), "relative": relative, "depth": maxf(0.0, (there - here).dot(normal))})
 
+static func deck_forward(orientation: Basis) -> Vector3:
+	var planar := -orientation.z.slide(Vector3.UP)
+	if planar.length_squared() < 0.0001:
+		planar = Vector3.UP.cross(orientation.x)
+	return planar.normalized()
+
 func step(delta: float, radius: Vector2) -> void:
 	cooldown = maxf(0.0, cooldown - delta)
 	flash = maxf(0.0, flash - delta * 4.5)
@@ -193,8 +207,8 @@ func step(delta: float, radius: Vector2) -> void:
 	if rotor_speed > 0.0:
 		rotor_angle = fposmod(rotor_angle + rotor_speed * delta, TAU)
 		sync_weapon_shapes()
-	var forward := -global_basis.z
-	var right := global_basis.x
+	var forward := deck_forward(global_basis)
+	var right := forward.cross(Vector3.UP)
 	var desired_speed := 0.0
 	var desired_yaw := 0.0
 	var braking := true
@@ -221,11 +235,11 @@ func step(delta: float, radius: Vector2) -> void:
 	# cancel the velocity and yaw the solver and rotor transfer just produced.
 	var control := 1.0 - 0.66 * clampf(impact_unload / 0.12, 0.0, 1.0)
 	impact_unload = maxf(0.0, impact_unload - delta)
-	var grip := (1.0 if grounded else 0.18) * drive_grip() * control
+	var grip := supported_drive_grip() * control
 	var limit := float(cfg.brake_acceleration) if braking else float(tune.acceleration)
 	# Feed forward the nominal deck resistance at cruising speed. Damage,
 	# impacts and traction still scale this force through the same grip.
-	var cruise := smoothstep(0.70, 1.0, absf(desired_speed) / drive_speed) if grounded else 0.0
+	var cruise := smoothstep(0.70, 1.0, absf(desired_speed) / drive_speed)
 	var drag := (signf(desired_speed) * deck_drag + desired_speed * drive_drag) * cruise
 	var longitudinal := clampf((desired_speed - linear_velocity.dot(forward)) * 5.0 + drag, -limit, limit)
 	var sideways := clampf(-linear_velocity.dot(right) * float(cfg.lateral_grip), -11.0, 11.0)
@@ -331,7 +345,7 @@ func _saw_order(delta: float, radius: Vector2, forward: Vector3, toward: Vector3
 		return _heading_order(forward, dodge_heading, drive_speed, dodge_reverse)
 	if maneuver == Maneuver.LINE_UP:
 		_begin_flank(radius)
-	var front: float = opponent.global_basis.z.dot(toward)
+	var front := -deck_forward(opponent.global_basis).dot(toward)
 	if maneuver == Maneuver.REPOSITION:
 		route_wait -= delta
 		if route_wait <= 0.0:
@@ -359,11 +373,11 @@ func _saw_order(delta: float, radius: Vector2, forward: Vector3, toward: Vector3
 	if (maneuver_age >= 0.23 and exchange_hit) or pass_time >= 0.82 or maneuver_age >= 1.58:
 		_recover(forward, toward, radius, "scored hit" if exchange_hit else "pass time limit")
 		return Vector2.ZERO
-	var side: float = signf(opponent.global_basis.x.dot(-toward))
+	var side: float = signf(deck_forward(opponent.global_basis).cross(Vector3.UP).dot(-toward))
 	if is_zero_approx(side):
 		side = turn_side
 	var shoulder_offset := lerpf(0.20, 0.80, clampf((front - 0.38) / 0.50, 0.0, 1.0))
-	var aim: Vector3 = toward * distance + _lead(0.18, 0.54) + opponent.global_basis.x * side * shoulder_offset
+	var aim: Vector3 = toward * distance + _lead(0.18, 0.54) + deck_forward(opponent.global_basis).cross(Vector3.UP) * side * shoulder_offset
 	var cut := forward.signed_angle_to(aim.normalized(), Vector3.UP)
 	if absf(cut) < 0.65 or opponent_contact:
 		pass_started = true
@@ -404,8 +418,8 @@ func _lead(seconds: float, limit: float) -> Vector3:
 
 func _plan_saw_lane(radius: Vector2) -> void:
 	var origin: Vector3 = opponent.position + _lead(0.27, 0.80)
-	var right: Vector3 = opponent.global_basis.x
-	var back: Vector3 = opponent.global_basis.z
+	var right: Vector3 = deck_forward(opponent.global_basis).cross(Vector3.UP)
+	var back := -deck_forward(opponent.global_basis)
 	# Commit to this flank relative to the chassis pose at the planning tick.
 	# Lead translation as it moves without letting its yaw drag us in a loop.
 	route_right = right
@@ -426,7 +440,7 @@ func _plan_saw_lane(radius: Vector2) -> void:
 			var heading := (entry - position).slide(Vector3.UP).normalized()
 			var route_cost := position.distance_to(entry) + (0.58 * gate.distance_to(target) if via_front else 0.0)
 			route_cost += 5.4 * (_rail_overflow(entry, limit) + _rail_overflow(target, limit))
-			route_cost += (1.0 + (1.0 - drive_grip()) * 2.0) * (1.0 - (-global_basis.z).dot(heading))
+			route_cost += (1.0 + (1.0 - drive_grip()) * 2.0) * (1.0 - deck_forward(global_basis).dot(heading))
 			route_cost += 0.18 if side != preferred else 0.0
 			if route_cost < best:
 				best = route_cost
@@ -451,7 +465,7 @@ func _update_saw_waypoint(radius: Vector2) -> void:
 		target = origin + right * (turn_side * 2.57) + back * 0.47
 	var limit := radius - Vector2.ONE * 1.34
 	flank_goal = Vector3(clampf(target.x, -limit.x, limit.x), position.y, clampf(target.z, -limit.y, limit.y))
-	flank_reverse = failed_wheel_count > 0 and (-global_basis.z).dot(flank_goal - position) < -0.70
+	flank_reverse = failed_wheel_count > 0 and deck_forward(global_basis).dot(flank_goal - position) < -0.70
 	route_wait = 0.15
 
 func _steer(angle: float, speed: float) -> Vector2:
@@ -493,7 +507,7 @@ func _resume_tactics(radius: Vector2, toward: Vector3) -> void:
 			_enter(Maneuver.GUARD)
 		Capability.OPEN_TARGET:
 			_enter(Maneuver.PRESS)
-			press_wide = opponent.global_basis.z.dot(toward) > 0.38
+			press_wide = -deck_forward(opponent.global_basis).dot(toward) > 0.38
 			if press_wide:
 				_pick_flank(radius, 2.46)
 		_:
@@ -515,7 +529,7 @@ func _guard_order(forward: Vector3, toward: Vector3, inward: Vector3, distance: 
 	return _steer(forward.signed_angle_to(lane, Vector3.UP), speed * 0.50)
 
 func _press_order(radius: Vector2, forward: Vector3, toward: Vector3, distance: float, planar_speed: float) -> Vector2:
-	var front: float = opponent.global_basis.z.dot(toward)
+	var front := -deck_forward(opponent.global_basis).dot(toward)
 	var lane := (flank_goal - position).slide(Vector3.UP)
 	if press_wide:
 		if (maneuver_age >= 0.30 and (front < 0.22 or lane.length() < 0.62)) or maneuver_age > 1.06 + (1.0 - drive_grip()):
@@ -532,7 +546,7 @@ func _press_order(radius: Vector2, forward: Vector3, toward: Vector3, distance: 
 		maneuver_age = 0.0
 		pressure_time = 0.0
 		return _heading_order(forward, (flank_goal - position).slide(Vector3.UP), drive_speed * 0.79, flank_reverse)
-	var aim: Vector3 = (opponent.position + opponent.global_basis.z * 0.30 - position).slide(Vector3.UP)
+	var aim: Vector3 = (opponent.position - deck_forward(opponent.global_basis) * 0.30 - position).slide(Vector3.UP)
 	var angle := forward.signed_angle_to(aim.normalized(), Vector3.UP)
 	return _steer(angle, drive_speed * 0.78 * clampf(1.0 - absf(angle) * 0.81, 0.0, 1.0))
 
@@ -557,7 +571,7 @@ func _recover(forward: Vector3, toward: Vector3, radius: Vector2, reason := "") 
 
 func _choose_escape(forward: Vector3, toward: Vector3, radius: Vector2) -> void:
 	var away := -toward if not toward.is_zero_approx() else -forward
-	var opponent_front: Vector3 = -opponent.global_basis.z
+	var opponent_front: Vector3 = deck_forward(opponent.global_basis)
 	var threat: Vector3 = opponent.position + opponent.linear_velocity.slide(Vector3.UP) * 0.19
 	var limit := radius - Vector2.ONE * 1.51
 	var best := -INF
@@ -611,8 +625,8 @@ func _begin_flank(radius: Vector2) -> void:
 
 func _pick_flank(radius: Vector2, width: float) -> void:
 	var limit := radius - Vector2.ONE * 1.42
-	var axis: Vector3 = opponent.global_basis.x
-	var base: Vector3 = opponent.position + opponent.global_basis.z * 0.38
+	var axis: Vector3 = deck_forward(opponent.global_basis).cross(Vector3.UP)
+	var base: Vector3 = opponent.position - deck_forward(opponent.global_basis) * 0.38
 	var best := -INF
 	for side in [-1.0, 1.0]:
 		var outside: Vector3 = base + axis * side * width
@@ -622,7 +636,7 @@ func _pick_flank(radius: Vector2, width: float) -> void:
 			best = score
 			flank_goal = Vector3(clampf(outside.x, -limit.x, limit.x), position.y, clampf(outside.z, -limit.y, limit.y))
 			turn_side = side
-	flank_reverse = failed_wheel_count > 0 and (-global_basis.z).dot(flank_goal - position) < -0.42
+	flank_reverse = failed_wheel_count > 0 and deck_forward(global_basis).dot(flank_goal - position) < -0.42
 
 static func _rail_overflow(point: Vector3, limit: Vector2) -> float:
 	return maxf(0.0, absf(point.x) - limit.x) + maxf(0.0, absf(point.z) - limit.y)
@@ -641,6 +655,16 @@ func weapon_output() -> float:
 
 func drive_grip() -> float:
 	return traction
+
+func supported_drive_grip() -> float:
+	var drives := wheel_state.size() - failed_wheel_count
+	if drives == 0:
+		return 0.0
+	var on_deck := 0
+	for wheel in range(wheel_state.size()):
+		if wheel_state[wheel] < Wheel.DRIVE_FAILED and (supported_wheels & (1 << wheel)) != 0:
+			on_deck += 1
+	return drive_grip() * float(on_deck) / drives
 
 func _update_traction() -> void:
 	var loss := 0.0
@@ -698,6 +722,12 @@ func damage_component(damage: float, part: String, shape_index: int, impulse := 
 	return changes
 
 func _detach_wheel(wheel: int, impulse: Vector3) -> void:
+	detached_wheel_count += 1
+	# The intact controller runs yaw-only. Once the support polygon changes,
+	# gravity and the surviving tread, skids and mounts determine the tilt.
+	axis_lock_angular_x = false
+	axis_lock_angular_z = false
+	supported_wheels &= ~(1 << wheel)
 	var axle := Vector3.ZERO
 	var owners: Array[int] = []
 	for owner in get_shape_owners():
@@ -715,9 +745,11 @@ func _detach_wheel(wheel: int, impulse: Vector3) -> void:
 	# against either combatant. The original tire and hub leave the chassis.
 	loose.collision_layer = 0
 	loose.collision_mask = Fit.WALL | Fit.DECK
-	var sliding_hub := PhysicsMaterial.new()
-	sliding_hub.friction = 0.12
-	loose.physics_material_override = sliding_hub
+	var debris_material := PhysicsMaterial.new()
+	debris_material.friction = 0.12
+	loose.physics_material_override = debris_material
+	loose.linear_damp = 0.36
+	loose.angular_damp = 0.55
 	for owner in owners:
 		var part := CollisionShape3D.new()
 		part.shape = shape_owner_get_shape(owner, 0)
@@ -729,9 +761,11 @@ func _detach_wheel(wheel: int, impulse: Vector3) -> void:
 	var center := to_global(axle)
 	loose.global_transform = Transform3D(global_basis, center)
 	var outward := global_basis.x * signf(axle.x)
-	var release := clampf(impulse.length() / 18.0, 0.66, 1.0)
-	loose.linear_velocity = linear_velocity + angular_velocity.cross(center - global_position) + outward * release
-	var roll := linear_velocity.dot(-global_basis.z) + angular_velocity.y * axle.x
+	# Clear the broken shaft with a small release along the axle.
+	var release := clampf(impulse.length() / 27.0, 0.50, 0.68)
+	var axle_motion := linear_velocity + angular_velocity.cross(center - to_global(center_of_mass))
+	loose.linear_velocity = axle_motion + outward * release
+	var roll := axle_motion.dot(-global_basis.z)
 	loose.angular_velocity = angular_velocity - global_basis.x * (roll / (0.320 if kind == "saw" else 0.294))
 	if art != null:
 		art.wheel_pivots[wheel].reparent(loose, true)
@@ -752,7 +786,7 @@ func begin_settle(radius: Vector2) -> void:
 		var direction := away.rotated(Vector3.UP, deg_to_rad(angle))
 		var next := position + direction * 1.0
 		var overflow := maxf(0.0, absf(next.x) - limit.x) + maxf(0.0, absf(next.z) - limit.y)
-		var score := direction.dot(away) + 0.32 * absf(direction.dot(global_basis.z)) - 4.0 * overflow
+		var score := direction.dot(away) + 0.32 * absf(direction.dot(deck_forward(global_basis))) - 4.0 * overflow
 		if score > best_score:
 			settle_direction = direction
 			best_score = score
