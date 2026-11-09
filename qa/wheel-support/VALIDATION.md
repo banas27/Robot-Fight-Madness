@@ -1,5 +1,7 @@
 # Wheel-loss support experiment
 
+See the [first episode release check](../release-check/VALIDATION.md) for tick measurements, 30 FPS clips and the export recommendation.
+
 The branch starts from `547a052`, which contains the validated convex Riptide hub correction in `cf80747`. Both robots keep their weapon pivots and four independent wheel pivots. The tire, outer hub and tread/hub colliders leave together. Bearing carriers, collars, stub shafts, crossmembers and skids remain on the chassis. The skids and carriers use fitted boxes. The small collars, shaft keys and crossmembers are visual details inside the support envelope.
 
 The first physical detachment releases pitch and roll. Gravity and the surviving solids determine posture. An attached failed motor still supports the chassis. The drive force and yaw controller use the fraction of usable wheels reporting upward deck contact and apply forces parallel to the deck. Debris starts at the wheel's exact visible pose, inherits axle-point movement and roll, and gets a 0.50–0.68 m/s outward release to clear the shaft. Loose wheels collide with the deck and rails. The showcase rotates a copy of the finish tilt and seats the lowest surviving solid on the pedestal. The introduction and combat rules use their existing timing and settings.
