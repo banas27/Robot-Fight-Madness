@@ -1,0 +1,18 @@
+{
+  "saw": {
+    "skid_center": [0.46, -0.166, -0.03],
+    "skid_size": [0.175, 0.185, 1.23],
+    "bearing_center": [0.535, -0.09],
+    "bearing_size": [0.13, 0.21, 0.26],
+    "shaft_center": 0.610,
+    "shaft_length": 0.170
+  },
+  "drum": {
+    "skid_center": [0.405, -0.199, -0.01],
+    "skid_size": [0.16, 0.196, 1.26],
+    "bearing_center": [0.431, -0.101],
+    "bearing_size": [0.108, 0.220, 0.28],
+    "shaft_center": 0.498,
+    "shaft_length": 0.130
+  }
+}

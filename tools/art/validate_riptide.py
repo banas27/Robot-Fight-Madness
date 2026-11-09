@@ -12,8 +12,8 @@ import subprocess
 PROJECT = Path(__file__).resolve().parents[2]
 QA = PROJECT / 'qa/art-r01'
 ASSET_CONTRACTS = {
-    'riptide': ('v02', .73, -.08, .43, (0,.04,-.87), 'Y'),
-    'bulldozer': ('v03', .605, -.105, .433, (0,-.021,-1.125), 'X'),
+    'riptide': ('v03', .73, -.08, .43, (0,.04,-.87), 'Y'),
+    'bulldozer': ('v04', .605, -.105, .433, (0,-.021,-1.125), 'X'),
 }
 
 def validate_glb(robot):
@@ -32,7 +32,7 @@ def validate_glb(robot):
     assert len(doc['materials']) <= 8 and len(blob) < 5_000_000
     triangles = sum(doc['accessors'][p['indices']]['count']//3
                     for mesh in doc['meshes'] for p in mesh['primitives'])
-    assert triangles < 25_000, triangles
+    assert triangles < 28_000, triangles
     root = f'Robot_{robot.title()}'
     expected = {root: (0,0,0), 'Chassis': (0,0,0),
                 'Wheel_FL': (-axle_x,axle_y,-axle_z), 'Wheel_FR': (axle_x,axle_y,-axle_z),
@@ -86,7 +86,7 @@ def validate_glb(robot):
                 'bounds':{'min':low,'max':high,'size':[b-a for a,b in zip(low,high)]},
                 'assembly_bounds':bounds,'pivot_positions':expected,
                 'rotation_axes':{k:(weapon_axis if k=='WeaponPivot' else 'X') for k in expected if k.startswith(('Wheel','Weapon'))},
-                'collision':'none; preserve existing R01 BoxShape3D',
+                'collision':'runtime compound fit in scripts/combat/collision_fit.gd',
                 'textures':[],'blender_version':'5.1.2','godot_validated':'4.7.2'}
     (path.parent/'asset.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(f'GLB PASS: {triangles:,} triangles; {len(doc["materials"])} materials; {len(blob):,} bytes')
@@ -115,9 +115,12 @@ def combat_check(godot):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--robot', choices=ASSET_CONTRACTS, default='riptide')
+    parser.add_argument('--asset-only', action='store_true', help='Validate the GLB and refresh its manifest')
     parser.add_argument('--godot')
     args=parser.parse_args()
     validate_glb(args.robot)
+    if args.asset_only:
+        return
     hashes=json.loads((QA/'original-file-hashes.json').read_text(encoding='utf-8-sig'))
     for entry in hashes:
         # R02 intentionally changed the entry scene, viewport and shared HUD.

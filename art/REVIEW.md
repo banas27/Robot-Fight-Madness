@@ -1,5 +1,23 @@
 # Robot art review
 
+## Wheel-support revisions
+
+Riptide v03 and Bulldozer v04 retain the same root, wheel pivots and weapon pivot. The chassis mesh includes the bearing carriers, collars, shafts, crossmembers and skids. Each wheel pivot owns its tire and rotating hub. See the [wheel-support validation](../qa/wheel-support/VALIDATION.md) for intact and detached views.
+
+| Robot | Editable Blender source | Runtime asset |
+| --- | --- | --- |
+| Riptide | [riptide_v03.blend](source/robots/riptide/riptide_v03.blend) | [riptide_v03.glb](../assets/robots/riptide/riptide_v03.glb) |
+| Bulldozer | [bulldozer_v04.blend](source/robots/bulldozer/bulldozer_v04.blend) | [bulldozer_v04.glb](../assets/robots/bulldozer/bulldozer_v04.glb) |
+
+Use `export_robot.py` with the current versioned Blender file to export hand edits. To reproduce the added hardware from the preceding sources, use Blender 5.1.2 and run these commands from the project folder.
+
+```powershell
+& $blender -b art/source/robots/riptide/riptide_v02.blend --python-exit-code 1 --python tools/art/add_wheel_support.py -- --robot riptide
+& $blender -b art/source/robots/bulldozer/bulldozer_v03.blend --python-exit-code 1 --python tools/art/add_wheel_support.py -- --robot bulldozer
+py tools/art/validate_riptide.py --asset-only --robot riptide
+py tools/art/validate_riptide.py --asset-only --robot bulldozer
+```
+
 ## Bulldozer v03
 
 Bulldozer has broad orange armor, recessed wheels and a steel cylinder with 15 staggered spikes. The drum spins around local X at (0, -0.021, -1.125) in Godot coordinates. The bearing forks belong to the chassis and the four wheels have individual axle pivots. In the R02 arena the drum spins up to attack speed and its spikes can strike the other robot. The R01 art review displays the same drum with the earlier ram rules.

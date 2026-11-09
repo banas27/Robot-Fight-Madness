@@ -1,29 +1,29 @@
 {
   "id": "riptide",
-  "version": "v02",
+  "version": "v03",
   "status": "visual_review",
   "style": "stylized industrial",
-  "source": "art/source/robots/riptide/riptide_v02.blend",
-  "runtime": "assets/robots/riptide/riptide_v02.glb",
+  "source": "art/source/robots/riptide/riptide_v03.blend",
+  "runtime": "assets/robots/riptide/riptide_v03.glb",
   "units": "meters",
   "up": "+Y",
   "forward": "-Z",
   "ground_y": -0.4,
   "runtime_scale": 1.0,
-  "triangle_count": 23676,
+  "triangle_count": 24540,
   "mesh_count": 6,
   "materials": [
     "Weapon_Steel",
     "Frame_Graphite",
+    "Safety_Amber",
     "Tire_Rubber",
     "Status_Ice",
     "Armor_Cyan",
-    "Marking_Ivory",
-    "Safety_Amber"
+    "Marking_Ivory"
   ],
   "surface_count": 31,
-  "bytes": 1394584,
-  "sha256": "ff96f1f0b3ae80bc6b675598861d7a9ef944af2128341e3b07cb6d96cec0fcf7",
+  "bytes": 1473740,
+  "sha256": "24390f7de52c18fc17b74dd7125e86071dfaf5fcd0508041bc1952f513704dd2",
   "bounds": {
     "min": [
       -0.8925000131130219,
@@ -44,12 +44,12 @@
   "assembly_bounds": {
     "ChassisMesh": {
       "min": [
-        -0.6650000214576721,
-        -0.1550000160932541,
+        -0.6970000267028809,
+        -0.25849997997283936,
         -0.9700000286102295
       ],
       "max": [
-        0.6649999618530273,
+        0.6969999074935913,
         0.4424999952316284,
         0.7329999804496765
       ]
@@ -159,7 +159,7 @@
     "Wheel_RR": "X",
     "WeaponPivot": "Y"
   },
-  "collision": "none; preserve existing R01 BoxShape3D",
+  "collision": "runtime compound fit in scripts/combat/collision_fit.gd",
   "textures": [],
   "blender_version": "5.1.2",
   "godot_validated": "4.7.2"
