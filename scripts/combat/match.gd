@@ -7,7 +7,6 @@ const RiptideRecoveryControl = preload("res://scripts/combat/riptide_recovery_co
 const RiptideTrackedPeel = preload("res://scripts/combat/riptide_tracked_peel.gd")
 const RiptideTrackedRoutes = preload("res://scripts/combat/riptide_tracked_routes.gd")
 const RiptideTrackedFlank = preload("res://scripts/combat/riptide_tracked_flank.gd")
-const BulldozerTrackedPressure = preload("res://scripts/combat/bulldozer_tracked_pressure.gd")
 const BulldozerTrackedIntercept = preload("res://scripts/combat/bulldozer_tracked_intercept.gd")
 const WeaponContact = preload("res://scripts/combat/weapon_contact.gd")
 const ImpactFX = preload("res://scripts/combat/impacts.gd")
@@ -124,7 +123,7 @@ func _ready() -> void:
 		push_error("Unknown Riptide AI: " + riptide_ai)
 		get_tree().quit(2)
 		return
-	if bulldozer_ai not in ["baseline", "tracked-intercept", "tracked-pressure"]:
+	if bulldozer_ai not in ["baseline", "tracked-intercept"]:
 		push_error("Unknown Bulldozer AI: " + bulldozer_ai)
 		get_tree().quit(2)
 		return
@@ -229,8 +228,6 @@ func _build_bots() -> void:
 			bot = RiptideTrackedPeel.new()
 		elif i == 0 and riptide_ai == "recovery-control":
 			bot = RiptideRecoveryControl.new()
-		elif i == 1 and bulldozer_ai == "tracked-pressure":
-			bot = BulldozerTrackedPressure.new()
 		elif i == 1 and bulldozer_ai == "tracked-intercept":
 			bot = BulldozerTrackedIntercept.new()
 		else:

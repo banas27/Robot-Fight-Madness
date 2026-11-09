@@ -6,8 +6,6 @@ from evaluate_tracked_ai import PROJECT, main
 PAIRINGS = {
     "reference": ("tracked-routes", "tracked-intercept"),
     "peel": ("tracked-peel", "tracked-intercept"),
-    "pressure": ("tracked-routes", "tracked-pressure"),
-    "combined": ("tracked-peel", "tracked-pressure"),
 }
 SCENES = {name: (LARGER, "larger") for name in PAIRINGS}
 

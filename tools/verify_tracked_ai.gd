@@ -5,7 +5,6 @@ const Robot = preload("res://scripts/combat/robot.gd")
 const SawPolicy = preload("res://scripts/combat/riptide_tracked_flank.gd")
 const RoutesPolicy = preload("res://scripts/combat/riptide_tracked_routes.gd")
 const PeelPolicy = preload("res://scripts/combat/riptide_tracked_peel.gd")
-const PressurePolicy = preload("res://scripts/combat/bulldozer_tracked_pressure.gd")
 const DrumPolicy = preload("res://scripts/combat/bulldozer_tracked_intercept.gd")
 var failures := 0
 
@@ -139,7 +138,7 @@ func run() -> void:
 	var saw_script: Script = probe.bots[0].get_script()
 	var drum_script: Script = probe.bots[1].get_script()
 	var routes := saw_script == RoutesPolicy or saw_script == PeelPolicy
-	var selected := (routes or saw_script == SawPolicy) and (drum_script == DrumPolicy or drum_script == PressurePolicy)
+	var selected := (routes or saw_script == SawPolicy) and drum_script == DrumPolicy
 	probe.queue_free()
 	await process_frame
 	if not selected:
