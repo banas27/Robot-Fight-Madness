@@ -24,8 +24,9 @@ func stage() -> Match:
 	arena.set_physics_process(false)
 	arena.phase = "fight"
 	var drum := arena.bots[1] as Robot
-	drum.art = drum.make_visual()
-	drum.add_child(drum.art)
+	if drum.art == null:
+		drum.art = drum.make_visual()
+		drum.add_child(drum.art)
 	drum.freeze = false
 	drum.position = Vector3(0, 0.4, 0)
 	drum.rotation.y = 0.0

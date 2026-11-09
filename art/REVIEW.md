@@ -10,6 +10,8 @@ The solver treats each attached belt as one rigid shape and each exposed road wh
 
 In standard seed 25, the visual-only test ended in a Bulldozer knockout at 18.68 seconds with 179 HP. The functional test ran to 25 seconds, with Bulldozer winning on health at 156 HP to Riptide's 6. The functional run scored two saw hits on weapon supports. The isolated fixtures exercised track and road-wheel strikes, motor failures, thrown belts and the damaged showcase. The recorded and headless combat reports agree.
 
+See the [tracked baseline validation](../qa/tracked-test/VALIDATION.md) for the labelled fixture recording, seed 13 episode checks and the native warning diagnosis.
+
 - [Editable Blender source](source/robots/bulldozer/bulldozer_v05_tracks.blend) · [Runtime review GLB](../assets/robots/bulldozer/bulldozer_v05_tracks.glb)
 - [Godot motion review](../renders/bulldozer-tracks/bulldozer-tracks.mp4) · [Close-up still](../renders/bulldozer-tracks/bulldozer-tracks.png)
 
