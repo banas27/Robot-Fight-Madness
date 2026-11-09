@@ -3,5 +3,7 @@
   "half_run": 0.433,
   "center_x": 0.683,
   "center_y": -0.105,
-  "pitch_radius": 0.269
+  "pitch_radius": 0.269,
+  "belt_outer_radius": 0.295,
+  "belt_width": 0.286
 }

@@ -5,3 +5,4 @@
 
 [node name="TrackedBulldozerTest" instance=ExtResource("1")]
 bulldozer_visual_override = ExtResource("2")
+bulldozer_uses_tracks = true

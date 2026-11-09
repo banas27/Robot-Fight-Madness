@@ -7,6 +7,7 @@ const DECK := 4
 const AXIAL := Basis(Vector3.BACK, PI * 0.5)
 const MARGIN := 0.002
 static var wheel_support: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config/wheel_support.json"))
+static var track_fit: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config/bulldozer_tracks.json"))
 
 static func install(bot) -> void:
 	var saw: bool = bot.kind == "saw"
@@ -16,6 +17,22 @@ static func install(bot) -> void:
 		_saw_body(bot)
 	else:
 		_drum_body(bot)
+	if bot.tracked_drive:
+		for side in [-1.0, 1.0]:
+			_track_belt(bot, side)
+			_road_wheels(bot, side)
+	else:
+		_wheels(bot, saw)
+	bot.rotor_owner = bot.create_shape_owner(bot)
+	bot.shape_roles[bot.rotor_owner] = "tooth"
+	if saw:
+		_saw_weapon(bot)
+	else:
+		_drum_weapon(bot)
+	bot.sync_weapon_shapes()
+	_install_wheel_support(bot, 0.43 if saw else 0.433)
+
+static func _wheels(bot, saw: bool) -> void:
 	for side in [-1.0, 1.0]:
 		for end in [-1.0, 1.0]:
 			var axle := Vector3(side * (0.73 if saw else 0.605), -0.08 if saw else -0.105,
@@ -33,14 +50,36 @@ static func install(bot) -> void:
 				_round_prism(bot, "wheel", hub, 0.108, 0.058, AXIAL)
 			else:
 				_cylinder(bot, "wheel", hub, 0.097, 0.041, AXIAL)
-	bot.rotor_owner = bot.create_shape_owner(bot)
-	bot.shape_roles[bot.rotor_owner] = "tooth"
-	if saw:
-		_saw_weapon(bot)
-	else:
-		_drum_weapon(bot)
-	bot.sync_weapon_shapes()
-	_install_wheel_support(bot, 0.43 if saw else 0.433)
+
+# One solid envelope per belt. The moving shoes are art, with one stable
+# contact patch along the straight bottom run for floor and weapon contact.
+static func _track_belt(bot, side: float) -> void:
+	var radius := float(track_fit.belt_outer_radius)
+	var run := float(track_fit.half_run)
+	var width := float(track_fit.belt_width)
+	var points := PackedVector3Array()
+	for x in [-width * 0.5, width * 0.5]:
+		for end in [-1.0, 1.0]:
+			for segment in range(13):
+				var angle := PI * float(segment) / 12.0
+				points.append(Vector3(x, radius * cos(angle), end * (run + radius * sin(angle))))
+	var center := Vector3(side * float(track_fit.center_x), float(track_fit.center_y), 0.0)
+	bot.add_solid(_convex(points), Transform3D(Basis.IDENTITY, center), "track")
+
+static func _road_wheels(bot, side: float) -> void:
+	var x := side * float(track_fit.center_x)
+	var y := float(track_fit.center_y)
+	var run := float(track_fit.half_run)
+	for end in [-1.0, 0.0, 1.0]:
+		var middle: bool = end == 0.0
+		var center := Vector3(x, y - (0.026 if middle else 0.0), end * run)
+		var tread := _round_prism(bot, "road_wheel", center, 0.224 if middle else 0.250, 0.247, AXIAL)
+		bot.road_tread_owners.append(tread)
+		# The belt supplies ground contact until it is thrown. Only the
+		# exposed hub is independently hittable with the belt in place.
+		bot.shape_owner_set_disabled(tread, true)
+		var hub := center + Vector3.RIGHT * side * 0.148
+		_round_prism(bot, "road_wheel", hub, 0.071, 0.037, AXIAL)
 
 static func _install_wheel_support(bot, axle_z: float) -> void:
 	var fit: Dictionary = wheel_support[bot.kind]
@@ -99,8 +138,9 @@ static func _drum_body(bot) -> void:
 		var guard := PackedVector2Array([Vector2(0.748,-0.634), Vector2(0.773,-0.628), Vector2(0.808,-0.497),
 			Vector2(0.808,0.497), Vector2(0.773,0.628), Vector2(0.748,0.634)])
 		_prism(bot, "chassis", shoulder, 0.194, 0.375, side)
-		_prism(bot, "chassis", guard, -0.092, 0.254, side)
-		_box(bot, "chassis", Vector3(side * 0.814,0.006,0.014), Vector3(0.026,0.069,0.81))
+		if not bot.tracked_drive:
+			_prism(bot, "chassis", guard, -0.092, 0.254, side)
+			_box(bot, "chassis", Vector3(side * 0.814,0.006,0.014), Vector3(0.026,0.069,0.81))
 		var fork := [Vector2(0.193,-0.680), Vector2(0.307,-0.682), Vector2(0.288,-0.807), Vector2(0.114,-1.151),
 			Vector2(0.055,-1.213), Vector2(-0.065,-1.215), Vector2(-0.125,-1.151), Vector2(-0.116,-1.077), Vector2(0.135,-0.766)]
 		var points := PackedVector3Array()
@@ -165,13 +205,13 @@ static func _core(bot, at: Vector3, radius: float, height: float, basis: Basis) 
 	# Inscribed faces give the solver explicit rim/cap edges for crossed rotors.
 	_round_prism(bot, "core", at, radius, height, basis)
 
-static func _round_prism(bot, role: String, at: Vector3, radius: float, height: float, basis: Basis) -> void:
+static func _round_prism(bot, role: String, at: Vector3, radius: float, height: float, basis: Basis) -> int:
 	var points := PackedVector3Array()
 	for y in [-height * 0.5, height * 0.5]:
 		for i in range(32):
 			var angle := TAU * i / 32.0
 			points.append(Vector3(radius * cos(angle), y, radius * sin(angle)))
-	bot.add_solid(_convex(points), Transform3D(basis, at), role)
+	return bot.add_solid(_convex(points), Transform3D(basis, at), role)
 
 static func _prism(bot, role: String, footprint: PackedVector2Array, low: float, high: float, side: float = 1.0) -> void:
 	var points := PackedVector3Array()

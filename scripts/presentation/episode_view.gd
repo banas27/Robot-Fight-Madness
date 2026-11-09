@@ -161,6 +161,8 @@ func _load_result(snapshot: Dictionary) -> void:
 			pivot.visible = state.wheel_states[wheel] != CombatRobot.Wheel.DETACHED
 			if pivot.visible:
 				pivot.basis = state.wheel_bases[wheel]
+		if state.has("track_states"):
+			visual.show_track_damage(state.track_states, state.road_wheel_states)
 
 func _turn_result(index: int, yaw: float) -> void:
 	models[index].basis = Basis(Vector3.UP, yaw) * match_node.result_snapshot.robots[index].tilt

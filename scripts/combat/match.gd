@@ -12,6 +12,7 @@ const ContactAudit = preload("res://scripts/combat/contact_audit.gd")
 const TIME_EPSILON := 0.000001
 
 @export var bulldozer_visual_override: Script
+@export var bulldozer_uses_tracks := false
 var combat: Dictionary
 var presentation: Dictionary
 var impact_fx: ImpactFX
@@ -49,6 +50,9 @@ var last_frame_us := 0
 const COMPONENT_NOTICES := {
 	"armor_damaged": "ARMOUR DAMAGED", "wheel_damaged": "WHEEL DAMAGED", "wheel_severe": "WHEEL BADLY DAMAGED",
 	"wheel_drive_failed": "WHEEL DRIVE FAILED", "wheel_detached": "WHEEL DETACHED", "weapon_disabled": "WEAPON DISABLED",
+	"track_damaged": "TRACK DAMAGED", "track_severe": "TRACK BADLY DAMAGED", "track_drive_failed": "TRACK DRIVE FAILED",
+	"track_detached": "TRACK THROWN", "road_wheel_damaged": "ROAD WHEEL DAMAGED",
+	"road_wheel_severe": "ROAD WHEEL BADLY DAMAGED", "road_wheel_detached": "ROAD WHEEL LOST",
 }
 var component_events: Array[Dictionary] = []
 var notice_queue: Array[Dictionary] = []
@@ -196,6 +200,7 @@ func _build_bots() -> void:
 		var kind := "saw" if i == 0 else "drum"
 		if kind == "drum":
 			bot.visual_override = bulldozer_visual_override
+			bot.tracked_drive = bulldozer_uses_tracks
 		bot.configure(kind, combat, rng.randf_range(0, 6), not headless)
 		bot.trace_orders = trace != null and trace.detailed
 		if contact_audit != null:
@@ -285,7 +290,7 @@ func _physics_process(delta: float) -> void:
 		peak_speed = maxf(peak_speed, bot.linear_velocity.length())
 		peak_lift = maxf(peak_lift, bot.position.y - 0.40)
 		lowest_root = minf(lowest_root, bot.position.y)
-		if bot.detached_wheel_count > 0:
+		if bot.detached_wheel_count > 0 or bot.track_state.has(CombatRobot.Wheel.DETACHED):
 			var clearance := bot.position.y + Fit.lowest_surface_y(bot, bot.global_basis)
 			min_detached_clearance = minf(min_detached_clearance, clearance)
 			max_detached_tilt = maxf(max_detached_tilt, rad_to_deg(Vector3.UP.angle_to(bot.global_basis.y)))
@@ -365,8 +370,15 @@ func _capture_result() -> void:
 		wheel_bases.make_read_only()
 		var weapon := "Disabled" if bot.weapon_disabled else ("Damaged" if bot.weapon_output() < 1.0 else "Operational")
 		var drive := "Operational"
-		if bot.drive_grip() <= 0.0:
+		var failed_tracks := bot.track_state.count(CombatRobot.Wheel.DRIVE_FAILED)
+		if bot.track_state.count(CombatRobot.Wheel.DETACHED) == 2:
+			drive = "Both tracks thrown"
+		elif bot.track_state.has(CombatRobot.Wheel.DETACHED):
+			drive = "Left track thrown" if bot.track_state[0] == CombatRobot.Wheel.DETACHED else "Right track thrown"
+		elif bot.drive_grip() <= 0.0:
 			drive = "Failed"
+		elif failed_tracks > 0:
+			drive = "Left track drive failed" if bot.track_state[0] == CombatRobot.Wheel.DRIVE_FAILED else "Right track drive failed"
 		elif bot.failed_wheel_count > 0:
 			drive = "Partial failure · %d/4 drives" % bot.failed_wheel_count
 		elif bot.drive_grip() < 1.0:
@@ -378,6 +390,13 @@ func _capture_result() -> void:
 			"armor_damage": bot.armor_damage, "wheel_states": wheel_states, "wheel_bases": wheel_bases,
 			"weapon_damage": bot.weapon_damage, "weapon_disabled": bot.weapon_disabled, "rotor_angle": bot.rotor_angle,
 			"weapon": weapon, "drive": drive, "tilt": tilt, "pedestal_height": -Fit.lowest_surface_y(bot, tilt)}
+		if bot.tracked_drive:
+			var track_states := bot.track_state.duplicate()
+			var road_wheel_states := bot.road_wheel_state.duplicate()
+			track_states.make_read_only()
+			road_wheel_states.make_read_only()
+			condition.track_states = track_states
+			condition.road_wheel_states = road_wheel_states
 		condition.make_read_only()
 		records.append(condition)
 	records.make_read_only()
@@ -422,12 +441,21 @@ func _apply_strike(attacker: CombatRobot, defender: CombatRobot, hit: Dictionary
 	defender.struck(damage, point, impulse, strength, major)
 	var shape_index := int(hit.get("target_shape", -1))
 	var wheel := defender.wheel_for_shape(shape_index) if hit.target_part == "wheel" and shape_index >= 0 else -1
+	var track := defender.track_for_shape(shape_index) if hit.target_part == "track" and shape_index >= 0 else -1
+	var road := defender.road_wheel_for_shape(shape_index) if hit.target_part == "road_wheel" and shape_index >= 0 else -1
 	for change in defender.damage_component(damage, hit.target_part, shape_index, impulse):
-		_component_changed(defender, change, wheel)
+		if change == "track_detached" and road >= 0:
+			_component_changed(defender, change, -1, int(road >= 3))
+		else:
+			_component_changed(defender, change, wheel, track, road)
 	if trace != null:
 		trace_hit.grip_after = defender.drive_grip()
 		trace_hit.wheel_damage = defender.wheel_damage.duplicate()
 		trace_hit.wheel_state = defender.wheel_state.duplicate()
+		if defender.tracked_drive:
+			trace_hit.track_damage = defender.track_damage.duplicate()
+			trace_hit.track_state = defender.track_state.duplicate()
+			trace_hit.road_wheel_state = defender.road_wheel_state.duplicate()
 	hit.kind = attacker.kind
 	_present(hit)
 	events.append({"time": snappedf(fight_elapsed, 0.001), "attacker": String(attacker.name), "damage": damage,
@@ -435,12 +463,16 @@ func _apply_strike(attacker: CombatRobot, defender: CombatRobot, hit: Dictionary
 		"strength": strength, "closing_speed": snappedf(float(hit.closing), 0.001),
 		"target_part": hit.target_part, "major": major, "source": "solver_tooth"})
 
-func _component_changed(bot: CombatRobot, change: String, wheel := -1) -> void:
+func _component_changed(bot: CombatRobot, change: String, wheel := -1, track := -1, road := -1) -> void:
 	var item := {"time": snappedf(fight_elapsed, 0.001), "robot": String(bot.name), "kind": change}
 	if wheel >= 0:
 		item.wheel = wheel
+	if track >= 0:
+		item.track = track
+	if road >= 0:
+		item.road_wheel = road
 	component_events.append(item)
-	var key := "%s/%s/%d" % [bot.name, change, wheel]
+	var key := "%s/%s/%d" % [bot.name, change, maxi(wheel, maxi(track, road))]
 	if phase == "fight" and bot.hp > 0.0 and not notice_seen.has(key):
 		notice_seen[key] = true
 		notice_queue.append(item)
@@ -521,7 +553,12 @@ func _process(delta: float) -> void:
 func _write_report() -> void:
 	var conditions := []
 	for state in result_snapshot.robots:
-		conditions.append({"weapon": state.weapon, "drive": state.drive, "wheels": state.wheel_states})
+		var condition := {"weapon": state.weapon, "drive": state.drive, "wheels": state.wheel_states}
+		if state.has("track_states"):
+			condition.erase("wheels")
+			condition.tracks = state.track_states
+			condition.road_wheels = state.road_wheel_states
+		conditions.append(condition)
 	var report := {"version": "R08", "seed": match_seed, "winner": winner_name, "reason": result_reason,
 		"riptide_ai": riptide_ai, "start": "swapped" if swapped_start else "standard", "start_poses": start_poses,
 		"duration": elapsed, "intro_duration": 0.0 if combat_only else cfg.intro_seconds,

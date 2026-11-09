@@ -2,7 +2,13 @@
 
 ## Bulldozer tracked review
 
-The tracked variant has 36 moving shoes per side around three road wheels, with the existing orange upper hull and spiked drum. Open [the tracked review scene](../scenes/review/bulldozer_tracks_review.tscn) in Godot and press **F6** for the turntable. The [tracked test arena](../scenes/review/arena_tracked_bulldozer_test.tscn) uses the same tracked rig in the introduction, match and showcase. Its belts animate from the chassis movement. The collision, drive and damage rules come from the wheeled fighter. The default arena loads Bulldozer v04.
+The tracked variant has 36 moving shoes per side around three road wheels, with the existing orange upper hull and spiked drum. Open [the tracked review scene](../scenes/review/bulldozer_tracks_review.tscn) in Godot and press **F6** for the turntable. The [tracked test arena](../scenes/review/arena_tracked_bulldozer_test.tscn) uses the tracked rig in the introduction, fight and showcase. The default arena loads wheeled Bulldozer v04.
+
+The test arena converts the original AI's speed and steering requests into forces at the left and right belts. Each belt uses a convex hull for contact. Its shoes animate with the measured motion of that side. The original wheel wear thresholds now apply independently to each belt. A failed motor leaves a passive belt that supports the chassis. A thrown belt releases a short strip and transfers support to the surviving road wheels. Road wheel hubs can take separate damage, and losing an end wheel throws the corresponding belt.
+
+The solver treats each attached belt as one rigid shape and each exposed road wheel as part of the chassis. Lateral grip uses the existing chassis controller, and loose belts use a rigid strip of shoes. The showcase retains the damage and missing parts from the end of the fight. Run the isolated checks with `& $godot --headless --path . --fixed-fps 60 --script res://tools/verify_tracks.gd`.
+
+In standard seed 25, the visual-only test ended in a Bulldozer knockout at 18.68 seconds with 179 HP. The functional test ran to 25 seconds, with Bulldozer winning on health at 156 HP to Riptide's 6. The functional run scored two saw hits on weapon supports. The isolated fixtures exercised track and road-wheel strikes, motor failures, thrown belts and the damaged showcase. The recorded and headless combat reports agree.
 
 - [Editable Blender source](source/robots/bulldozer/bulldozer_v05_tracks.blend) · [Runtime review GLB](../assets/robots/bulldozer/bulldozer_v05_tracks.glb)
 - [Godot motion review](../renders/bulldozer-tracks/bulldozer-tracks.mp4) · [Close-up still](../renders/bulldozer-tracks/bulldozer-tracks.png)

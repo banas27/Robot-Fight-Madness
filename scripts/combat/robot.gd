@@ -19,6 +19,7 @@ var active := false
 var preparing := true
 var art: RobotArt
 var visual_override: Script
+var tracked_drive := false
 var shape_roles: Dictionary = {}
 var rotor_owner: int
 var weapon_pivot: Vector3
@@ -32,6 +33,8 @@ var rotor_speed := 0.0
 var flash := 0.0
 var contacts: Array[Dictionary] = []
 var supported_wheels := 0
+var supported_tracks := 0
+var supported_road_wheels := 0
 var deck_contact_roles: Dictionary = {}
 enum Maneuver { LINE_UP, ATTACK, RECOVER, REPOSITION, GUARD, PRESS, HOLD, EVADE, RAM_PRESS, BRAKE }
 enum Capability { ARMED, UNARMED, OPEN_TARGET, NO_DRIVE }
@@ -84,6 +87,11 @@ var opponent_contact := false
 var armor_damage := 0.0
 var wheel_damage := [0.0, 0.0, 0.0, 0.0]
 var wheel_state := [0, 0, 0, 0]
+var track_damage := [0.0, 0.0]
+var track_state := [Wheel.INTACT, Wheel.INTACT]
+var road_wheel_damage := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+var road_wheel_state := [Wheel.INTACT, Wheel.INTACT, Wheel.INTACT, Wheel.INTACT, Wheel.INTACT, Wheel.INTACT]
+var road_tread_owners: Array[int] = []
 var failed_wheel_count := 0
 var detached_wheel_count := 0
 var traction := 1.0
@@ -137,11 +145,12 @@ func make_visual() -> RobotArt:
 		return visual_override.new()
 	return SawArt.new() if kind == "saw" else DrumArt.new()
 
-func add_solid(shape: Shape3D, local: Transform3D, role: String) -> void:
+func add_solid(shape: Shape3D, local: Transform3D, role: String) -> int:
 	var owner := create_shape_owner(self)
 	shape_owner_add_shape(owner, shape)
 	shape_owner_set_transform(owner, local)
 	shape_roles[owner] = role
+	return owner
 
 func sync_weapon_shapes() -> void:
 	# Each complete tooth pitch leaves the collider union unchanged. Keep
@@ -159,6 +168,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if audit_local_shape >= 0:
 		audit_witnesses.clear()
 	supported_wheels = 0
+	supported_tracks = 0
+	supported_road_wheels = 0
 	deck_contact_roles.clear()
 	wall_contact = false
 	opponent_contact = false
@@ -173,6 +184,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 				deck_contact_roles[role] = true
 				if role == "wheel":
 					supported_wheels |= 1 << wheel_for_shape(index)
+				elif role == "track":
+					supported_tracks |= 1 << track_for_shape(index)
+				elif role == "road_wheel":
+					supported_road_wheels |= 1 << road_wheel_for_shape(index)
 			continue
 		var here := state.get_contact_local_position(i)
 		var there := state.get_contact_collider_position(i)
@@ -241,7 +256,6 @@ func step(delta: float, radius: Vector2) -> void:
 	# cancel the velocity and yaw the solver and rotor transfer just produced.
 	var control := 1.0 - 0.66 * clampf(impact_unload / 0.12, 0.0, 1.0)
 	impact_unload = maxf(0.0, impact_unload - delta)
-	var grip := supported_drive_grip() * control
 	var limit := float(cfg.brake_acceleration) if braking else float(tune.acceleration)
 	# Feed forward the nominal deck resistance at cruising speed. Damage,
 	# impacts and traction still scale this force through the same grip.
@@ -259,11 +273,29 @@ func step(delta: float, radius: Vector2) -> void:
 			var push_limit := 3.2 if kind == "drum" and (maneuver == Maneuver.ATTACK or maneuver == Maneuver.RAM_PRESS) and desired_speed > 0.0 and not contact.wall else 1.8
 			if push < -push_limit:
 				drive += outward * (-push_limit - push)
-	apply_central_force(drive * mass * grip)
 	var yaw_accel := clampf((desired_yaw - angular_velocity.y) * float(tune.turn_response), -23.0, 23.0)
-	apply_torque(Vector3.UP * inertia.y * yaw_accel * grip)
+	if tracked_drive:
+		_apply_track_drive(forward, right, drive, inertia.y * yaw_accel, limit, control)
+	else:
+		var grip := supported_drive_grip() * control
+		apply_central_force(drive * mass * grip)
+		apply_torque(Vector3.UP * inertia.y * yaw_accel * grip)
 	if art != null:
-		art.update_visual(delta, rotor_angle, linear_velocity.dot(forward), angular_velocity.y, flash * 0.42, hp <= 0.0)
+		var belt_support := supported_tracks if tracked_drive else 3
+		art.update_visual(delta, rotor_angle, linear_velocity.dot(forward), angular_velocity.y, flash * 0.42,
+			hp <= 0.0, belt_support, supported_road_wheels)
+
+func _apply_track_drive(forward: Vector3, right: Vector3, drive: Vector3, yaw_torque: float, limit: float, control: float) -> void:
+	var half_span := float(Fit.track_fit.center_x)
+	var force := drive.dot(forward) * mass
+	var cap := limit * mass * 0.5
+	for side in range(2):
+		var offset := half_span * (-1.0 if side == 0 else 1.0)
+		# Resolve the existing speed and yaw requests into belt forces.
+		# The deck contacts and drive condition determine which side can push.
+		var demand := clampf(0.5 * (force + yaw_torque / offset), -cap, cap)
+		apply_force(forward * demand * _supported_track_grip(side) * control, right * offset)
+	apply_central_force(drive.slide(forward) * mass * supported_drive_grip() * control)
 
 func _drive_order(delta: float, radius: Vector2, forward: Vector3) -> Vector2:
 	maneuver_age += delta
@@ -663,6 +695,8 @@ func drive_grip() -> float:
 	return traction
 
 func supported_drive_grip() -> float:
+	if tracked_drive:
+		return (_supported_track_grip(0) + _supported_track_grip(1)) * 0.5
 	var drives := wheel_state.size() - failed_wheel_count
 	if drives == 0:
 		return 0.0
@@ -671,6 +705,19 @@ func supported_drive_grip() -> float:
 		if wheel_state[wheel] < Wheel.DRIVE_FAILED and (supported_wheels & (1 << wheel)) != 0:
 			on_deck += 1
 	return drive_grip() * float(on_deck) / drives
+
+func _supported_track_grip(side: int) -> float:
+	return _track_grip(side) if supported_tracks & (1 << side) else 0.0
+
+func _track_grip(side: int) -> float:
+	var wear: float = track_damage[side]
+	if wear >= WHEEL_FAILED:
+		return 0.0
+	if wear >= WHEEL_SEVERE:
+		return 1.0 - lerpf(0.12, 0.19, inverse_lerp(WHEEL_SEVERE, WHEEL_FAILED, wear))
+	if wear >= WHEEL_WORN:
+		return 1.0 - lerpf(0.045, 0.075, inverse_lerp(WHEEL_WORN, WHEEL_SEVERE, wear))
+	return 1.0
 
 func _update_traction() -> void:
 	var loss := 0.0
@@ -689,10 +736,22 @@ func wheel_for_shape(shape_index: int) -> int:
 	var axle := shape_owner_get_transform(shape_find_owner(shape_index)).origin
 	return _wheel_at(axle)
 
+func track_for_shape(shape_index: int) -> int:
+	var center := shape_owner_get_transform(shape_find_owner(shape_index)).origin
+	return int(center.x > 0.0)
+
+func road_wheel_for_shape(shape_index: int) -> int:
+	var center := shape_owner_get_transform(shape_find_owner(shape_index)).origin
+	return int(center.x > 0.0) * 3 + int(signf(center.z)) + 1
+
 static func _wheel_at(axle: Vector3) -> int:
 	return int(axle.x > 0.0) + 2 * int(axle.z > 0.0)
 
 func damage_component(damage: float, part: String, shape_index: int, impulse := Vector3.ZERO) -> Array[String]:
+	if part == "track" and shape_index >= 0:
+		return _damage_track(shape_index, damage, impulse)
+	if part == "road_wheel" and shape_index >= 0:
+		return _damage_road_wheel(road_wheel_for_shape(shape_index), damage, impulse)
 	var changes: Array[String] = []
 	if part == "chassis" or part == "support":
 		var prior := armor_damage
@@ -726,6 +785,112 @@ func damage_component(damage: float, part: String, shape_index: int, impulse := 
 	if art != null:
 		art.show_damage(armor_damage, wheel_state, weapon_damage, weapon_disabled)
 	return changes
+
+func _damage_track(shape_index: int, damage: float, impulse: Vector3) -> Array[String]:
+	var side := track_for_shape(shape_index)
+	track_damage[side] += damage
+	traction = (_track_grip(0) + _track_grip(1)) * 0.5
+	var wear: float = track_damage[side]
+	var stage := Wheel.INTACT
+	if wear >= WHEEL_MOUNT_BROKEN:
+		stage = Wheel.DETACHED
+	elif wear >= WHEEL_FAILED:
+		stage = Wheel.DRIVE_FAILED
+	elif wear >= WHEEL_SEVERE:
+		stage = Wheel.SEVERE
+	elif wear >= WHEEL_WORN:
+		stage = Wheel.WORN
+	if track_state[side] == stage:
+		return []
+	if stage == Wheel.DETACHED:
+		_throw_belt(side, impulse)
+		return ["track_detached"]
+	track_state[side] = stage
+	_show_track_condition()
+	return [["", "track_damaged", "track_severe", "track_drive_failed"][stage]]
+
+func _damage_road_wheel(wheel: int, damage: float, impulse: Vector3) -> Array[String]:
+	road_wheel_damage[wheel] += damage
+	var wear: float = road_wheel_damage[wheel]
+	var stage := Wheel.INTACT
+	if wear >= WHEEL_MOUNT_BROKEN:
+		stage = Wheel.DETACHED
+	elif wear >= WHEEL_SEVERE:
+		stage = Wheel.SEVERE
+	elif wear >= WHEEL_WORN:
+		stage = Wheel.WORN
+	if road_wheel_state[wheel] == stage:
+		return []
+	road_wheel_state[wheel] = stage
+	var changes: Array[String] = [["", "road_wheel_damaged", "road_wheel_severe", "", "road_wheel_detached"][stage]]
+	if stage == Wheel.DETACHED:
+		_drop_road_wheel(wheel, impulse)
+		var side := int(wheel >= 3)
+		if wheel % 3 != 1 and track_state[side] != Wheel.DETACHED:
+			_throw_belt(side, impulse)
+			changes.append("track_detached")
+	_show_track_condition()
+	return changes
+
+func _show_track_condition() -> void:
+	if art != null:
+		art.show_track_damage(track_state, road_wheel_state)
+
+func _throw_belt(side: int, impulse: Vector3) -> void:
+	track_state[side] = Wheel.DETACHED
+	track_damage[side] = maxf(track_damage[side], WHEEL_MOUNT_BROKEN)
+	traction = (_track_grip(0) + _track_grip(1)) * 0.5
+	supported_tracks &= ~(1 << side)
+	axis_lock_angular_x = false
+	axis_lock_angular_z = false
+	var sign_x := -1.0 if side == 0 else 1.0
+	for owner in get_shape_owners():
+		if shape_roles[owner] == "track" and signf(shape_owner_get_transform(owner).origin.x) == sign_x:
+			shape_owner_set_disabled(owner, true)
+	for wheel in range(side * 3, side * 3 + 3):
+		if road_wheel_state[wheel] != Wheel.DETACHED:
+			shape_owner_set_disabled(road_tread_owners[wheel], false)
+	var fit := Fit.track_fit
+	var center := Vector3(sign_x * float(fit.center_x), float(fit.center_y) - float(fit.pitch_radius), 0.0)
+	var strip := BoxShape3D.new()
+	strip.size = Vector3(float(fit.belt_width), 0.050, 0.48)
+	var loose := _spawn_track_debris(center, strip, Basis.IDENTITY, impulse)
+	if art != null:
+		art.release_belt_strip(side, loose)
+	_show_track_condition()
+
+func _drop_road_wheel(wheel: int, impulse: Vector3) -> void:
+	var tread := road_tread_owners[wheel]
+	var local := shape_owner_get_transform(tread)
+	var loose := _spawn_track_debris(local.origin, shape_owner_get_shape(tread, 0), local.basis, impulse)
+	var radius := 0.224 if wheel % 3 == 1 else 0.250
+	loose.angular_velocity -= global_basis.x * (loose.linear_velocity.dot(-global_basis.z) / radius)
+	for owner in get_shape_owners():
+		if shape_roles[owner] == "road_wheel" and road_wheel_for_shape(shape_owner_get_shape_index(owner, 0)) == wheel:
+			shape_owner_set_disabled(owner, true)
+	supported_road_wheels &= ~(1 << wheel)
+	if art != null:
+		art.release_road_wheel(wheel, loose)
+
+func _spawn_track_debris(center: Vector3, shape: Shape3D, local_basis: Basis, impulse: Vector3) -> RigidBody3D:
+	var loose := RigidBody3D.new()
+	loose.mass = 1.6
+	loose.collision_layer = 0
+	loose.collision_mask = Fit.WALL | Fit.DECK
+	loose.linear_damp = 0.36
+	loose.angular_damp = 0.55
+	var collider := CollisionShape3D.new()
+	collider.shape = shape
+	collider.basis = local_basis
+	loose.add_child(collider)
+	get_parent().add_child(loose)
+	var at := to_global(center)
+	loose.global_transform = Transform3D(global_basis, at)
+	var release := clampf(impulse.length() / 27.0, 0.50, 0.68)
+	loose.linear_velocity = linear_velocity + angular_velocity.cross(at - to_global(center_of_mass))
+	loose.linear_velocity += global_basis.x * signf(center.x) * release
+	loose.angular_velocity = angular_velocity
+	return loose
 
 func _detach_wheel(wheel: int, impulse: Vector3) -> void:
 	detached_wheel_count += 1

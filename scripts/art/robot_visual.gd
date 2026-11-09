@@ -108,7 +108,17 @@ func _mark_bar(parent: Node3D, point: Vector3, angle: float, length: float, widt
 	stripe.position = point
 	stripe.rotation.x = angle
 
-func update_visual(delta: float, weapon_angle: float, forward_speed: float, yaw_speed: float, flash: float = 0.0, defeated: bool = false) -> void:
+func show_track_damage(_stages: Array, _road_wheels: Array) -> void:
+	pass
+
+func release_belt_strip(_side: int, _debris: RigidBody3D) -> void:
+	pass
+
+func release_road_wheel(_wheel: int, _debris: RigidBody3D) -> void:
+	pass
+
+func update_visual(delta: float, weapon_angle: float, forward_speed: float, yaw_speed: float, flash: float = 0.0,
+		defeated: bool = false, _belt_support: int = 3, _road_support: int = 0) -> void:
 	weapon_pivot.basis = Basis(weapon_axis, weapon_angle)
 	for i in range(wheel_pivots.size()):
 		if wheel_wear[i] == 4:

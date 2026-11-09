@@ -115,6 +115,10 @@ func _draw_broadcast(m: Node3D) -> void:
 		panel(Rect2(105, 277, 474, 54), Color("101a23f7"), 13)
 		draw_circle(Vector2(126, 304), 4.5, color)
 		var notice_text: String = m.COMPONENT_NOTICES[notice.kind]
+		if notice.has("track"):
+			notice_text = ("LEFT " if notice.track == 0 else "RIGHT ") + notice_text
+		elif notice.has("road_wheel"):
+			notice_text = ("LEFT " if notice.road_wheel < 3 else "RIGHT ") + notice_text
 		text_at("%s  /  %s" % [notice.robot.to_upper(), notice_text], Vector2(141, 312), 21, white)
 
 func _broadcast_hp(m: Node3D, i: int) -> float:

@@ -16,7 +16,8 @@ func add_robot(robot: Robot) -> void:
 	var holder := Node3D.new()
 	robot.add_child(holder)
 	parts.append(holder)
-	var colors := {"chassis": Color("79e1f9"), "wheel": Color("be94ff"), "support": Color("6dff9f"),
+	var colors := {"chassis": Color("79e1f9"), "wheel": Color("be94ff"), "track": Color("be94ff"),
+		"road_wheel": Color("be94ff"), "support": Color("6dff9f"),
 		"core": Color("ffa64b"), "tooth": Color("ffe069")}
 	var materials := {}
 	for role in colors:
@@ -26,7 +27,7 @@ func add_robot(robot: Robot) -> void:
 		holder.add_child(group)
 		group.transform = robot.shape_owner_get_transform(owner)
 		var role: String = robot.shape_roles[owner]
-		if role == "wheel":
+		if role in ["wheel", "track", "road_wheel"]:
 			wheel_shapes.append({"robot": robot, "owner": owner, "group": group})
 		for i in range(robot.shape_owner_get_shape_count(owner)):
 			var shape := robot.shape_owner_get_shape(owner, i)
@@ -54,7 +55,7 @@ func toggle() -> void:
 		layer.add_child(legend)
 		legend.position = Vector2(31, 1190)
 		legend.add_theme_font_size_override("font_size", 16)
-		legend.text = "CYAN hull  VIOLET wheels  GREEN supports  AMBER core  YELLOW teeth  PINK hit"
+		legend.text = "CYAN hull  VIOLET drive  GREEN supports  AMBER core  YELLOW teeth  PINK hit"
 	legend.visible = visible_overlay
 	if marker != null:
 		marker.visible = visible_overlay and marker_life > 0.0
