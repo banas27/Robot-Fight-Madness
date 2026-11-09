@@ -1,0 +1,9 @@
+# Episode 001 validation protocol
+
+The working branch starts at `d720d4c2c803c6255ed21d4838071dd83a47c5c7` and uses the larger functional tracked scene. All policies share the original combat settings, fixed physics step, arena, seeded starts and recording workflow.
+
+The 20 prior arena confirmation seeds serve as known development cases here. The reference is `tracked-routes` versus `tracked-intercept`. Develop and compare `tracked-peel` and `tracked-pressure` separately against that reference before running the combination. The commit introducing this protocol and the fresh confirmation manifest freezes the candidates. Run 40 starts per pairing in the reserved suite, with both layouts per seed.
+
+Use the existing arena, combat and recovery measurements. A practical Riptide improvement reduces mean stall time and repeated recovery links by at least 20%, preserves attack conversion within five percentage points, and preserves or improves side/rear hits. A practical Bulldozer improvement reduces unproductive push time by at least 0.30 seconds or 10%, with productive push time within 0.20 seconds and pass conversion within five points. Inspect damage exchange, actual side hits and longest quiet gaps alongside these gates. The combined matchup must preserve the reduction in stalls and recovery loops, maintain attacking activity and offer a reason to include both candidates over the better single change. Wins are descriptive.
+
+Select production footage only after evaluating the policies. Use known development fights as the selection pool. Prioritize repeated meaningful exchanges, damage from both fighters, visible changes of position, clear framing and intact presentation. Retain reports for all runs and distinguish episode curation from policy evaluation. Use original combat audio unless an approved music license is documented.
