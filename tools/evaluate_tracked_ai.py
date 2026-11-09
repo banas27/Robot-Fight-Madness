@@ -94,7 +94,8 @@ def summarize(rows):
 
 
 def main(*, pairings=PAIRINGS, reserved=RESERVED, development=SEEDS, diagnostics=(),
-         diagnostic_pairings=(), extra_metrics=None, extra_summary=None):
+         diagnostic_pairings=None, extra_metrics=None, extra_summary=None, scene_options=None):
+    diagnostic_pairings = diagnostic_pairings or {}
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--godot", required=True)
     splits = ("development", "reserved", "parity") + (("diagnostic",) if diagnostics else ())
@@ -127,19 +128,26 @@ def main(*, pairings=PAIRINGS, reserved=RESERVED, development=SEEDS, diagnostics
     def run(case):
         pairing, seed, layout = case
         saw, drum = selection[pairing]
+        scene, variant = (scene_options or {}).get(pairing, (SCENE, None))
+
         def run_one(episode=False, trace_level="standard"):
             return run_match(args.godot, root / pairing, seed, layout, saw, episode, trace_level,
-                             scene=SCENE, extra_args=(f"--bulldozer-ai={drum}",), keep_log=True)
+                             scene=scene, extra_args=(f"--bulldozer-ai={drum}",), keep_log=True)
         level = "contacts" if args.contacts else "standard"
         try:
             match, trace = run_one(trace_level=level)
             assert match["bulldozer_ai"] == drum
+            if variant is not None:
+                assert match["arena_variant"] == variant, (scene, match["arena_variant"])
             assert (match["bulldozer_drive"], len(match["final_conditions"][1]["tracks"]),
                     len(match["final_conditions"][1]["road_wheels"])) == ("tracks", 2, 6)
             if args.split == "parity":
                 for episode, run_level in ((False, "untraced"), (True, "untraced"), (True, level)):
                     alternate, _ = run_one(episode, run_level)
                     changed = [key for key in PARITY_KEYS if match[key] != alternate[key]]
+                    if variant is not None:
+                        assert alternate["arena_variant"] == variant
+                        assert alternate["usable_floor_m"] == match["usable_floor_m"]
                     assert not changed, f"Parity differences {changed}, episode={episode}, trace={run_level}"
                     if episode:
                         assert abs(alternate["intro_duration"] - 10.0) < 1e-6
@@ -159,6 +167,9 @@ def main(*, pairings=PAIRINGS, reserved=RESERVED, development=SEEDS, diagnostics
         results = list(pool.map(run, cases))
     summary = {"commit": commit, "dirty": dirty, "split": args.split, "scene": SCENE,
                "seeds": seeds, "pairings": {}, "errors": [], "parity": args.split == "parity"}
+    if scene_options:
+        del summary["scene"]
+        summary["scenes"] = {pair: scene_options[pair][0] for pair in args.pairings}
     by_pair = {pair: [] for pair in args.pairings}
     starts = {}
     for (pair, seed, layout), row in results:

@@ -1,0 +1,17 @@
+# Arena space experiment
+
+Start from `9f9348174c0c9d731ffa13951a5ec7b6b4155d41` and use the `tracked-routes` policy frozen at `ef12b2f942bcff8aaf22f1f8bf1fec14810a539e`. The two tracked scenes share baseline Bulldozer, either original or `tracked-routes` Riptide, the existing 180 Hz fixed step and the normal episode schedule. The evaluator requires identical starting poses across all four pairings for each seed and layout. Swapped starts rotate both poses 180°.
+
+Known diagnostic seeds are 13, 25 and 337082. Standard 337082 is the prior recovery failure with `tracked-routes` against baseline Bulldozer. The old result and trace are preserved. The prior 867307 failure used `tracked-intercept` and therefore belongs to a different opponent comparison. Both layouts of each diagnostic seed stay outside confirmation. The commit containing this protocol and the [confirmation manifest](seeds-confirmation.json) freezes implementation and measurements after diagnostic review. Evaluate all four pairings from a clean checkout on 20 fresh seeds in both layouts.
+
+## Measurement
+
+- Usable width and length are measured between inner rail collider faces. Their product gives floor area. The larger scene scales the clear half-spans by √2 and adds the original half rail thickness to find the new rail centres. AI and containment use the active rail centres, preserving their world-unit clearance margins.
+- Reuse the [combat and route definitions](../tracked-ai-01/PROTOCOL.md) and [recovery definitions](../riptide-routes-02/PROTOCOL.md) for outcomes, normalized HP, actual HP damage, passes, side/rear hits, pinning, stalls, retreat, sustained escapes and recovery loops. Report both robots' damage and both robots' pin/stall times in raw evidence. Summarize Riptide's recovery separately.
+- First damage is the earliest awarded strike by either robot. Report the median with its observed count and any fights without damage. A meaningful exchange uses the same awarded strike or productive push of at least 0.15 s as the existing evaluator. Report completed quiet gaps of at least 0.35 s between meaningful ticks, with their pooled mean and count. The longest quiet gap retains opening and ending gaps, with a long quiet fight defined by at least one gap of 5 s.
+- Timeouts count production outcomes decided at the time limit, including draws. Record engine warnings, non-finite states and the established solver outliers without removing cases from the comparison.
+- Video verification uses production framing, fixed-resolution frame decode, event parity and a 1.55 m envelope projected at each robot centre for estimated edge clearance. The envelope is a camera check. Use extracted frames to review visible scale, weapons and HUD.
+
+## Decision
+
+Compare each Riptide policy against itself. Favor the larger arena as the next tracked test setup if it reduces stalls or pin time by at least 20% for both policies, preserves or improves recovery, and keeps combat active. Treat an increase of more than 0.30 s to median first damage, 0.75 s to mean longest quiet time, or a fall greater than 5 percentage points in either attack conversion as a material trade-off. Check timeout frequency alongside damage and attack counts. For a Riptide recommendation, weigh damage and conversion gains against sustained escape rate and the frequency of stalled recovery in the preferred arena. Wins and the selected recordings are descriptive. Require boundary, reset, framing and parity checks.

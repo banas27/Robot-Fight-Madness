@@ -14,9 +14,11 @@ const Fit = preload("res://scripts/combat/collision_fit.gd")
 const EpisodeView = preload("res://scripts/presentation/episode_view.gd")
 const ContactAudit = preload("res://scripts/combat/contact_audit.gd")
 const TIME_EPSILON := 0.000001
+const FIGHTER_FRAME_RADIUS := 1.55
 
 @export var bulldozer_visual_override: Script
 @export var bulldozer_uses_tracks := false
+@export var larger_arena := false
 var combat: Dictionary
 var presentation: Dictionary
 var impact_fx: ImpactFX
@@ -51,6 +53,8 @@ var trace
 var contact_audit: ContactAudit
 var frame_times: Array[float] = []
 var last_frame_us := 0
+var framing_min_margin_px := INF
+var framing_max_width := 0.0
 const COMPONENT_NOTICES := {
 	"armor_damaged": "ARMOUR DAMAGED", "wheel_damaged": "WHEEL DAMAGED", "wheel_severe": "WHEEL BADLY DAMAGED",
 	"wheel_drive_failed": "WHEEL DRIVE FAILED", "wheel_detached": "WHEEL DETACHED", "weapon_disabled": "WEAPON DISABLED",
@@ -151,6 +155,10 @@ func _exit_tree() -> void:
 	super._exit_tree()
 
 func _build_arena() -> void:
+	if larger_arena:
+		var rail_half := ARENA_RAIL_THICKNESS * 0.5
+		for axis in ["arena_half_width", "arena_half_length"]:
+			cfg[axis] = (float(cfg[axis]) - rail_half) * sqrt(2.0) + rail_half
 	super._build_arena()
 	var floor_material := Shapes.material(Color("455360"), 0.13)
 	floor_material.roughness = 0.83
@@ -566,15 +574,44 @@ func _process(delta: float) -> void:
 	var target_size := clampf(5.8 + distance * 0.98, float(presentation.camera_min_width), float(presentation.camera_max_width))
 	if debug_close:
 		target_size = clampf(2.35 + distance * 1.16, 4.9, float(presentation.camera_max_width))
-	camera.size = lerpf(camera.size, target_size, amount)
+	if larger_arena and not debug_close:
+		target_size = maxf(target_size, _fighter_frame_width(0.23))
+		camera.size = maxf(lerpf(camera.size, target_size, amount), _fighter_frame_width(0.0))
+	else:
+		camera.size = lerpf(camera.size, target_size, amount)
 	var amplitude := shake * float(presentation.camera_max_shake)
 	camera.h_offset = sin(elapsed * 103.0) * amplitude
 	camera.v_offset = sin(elapsed * 81.0) * amplitude * 0.52
 	if perf_path != "":
+		if phase == "fight":
+			_sample_framing()
 		var now := Time.get_ticks_usec()
 		if last_frame_us > 0 and phase == "fight" and fight_elapsed > 0.4 and frame_times.size() < 12000:
 			frame_times.append(float(now - last_frame_us) / 1000.0)
 		last_frame_us = now
+
+func _fighter_frame_width(lead: float) -> float:
+	# Keep the standard shot until the projected fighter envelopes need room.
+	# Lead the zoom briefly so a wide separation opens the view smoothly.
+	var viewport_size := get_viewport().get_visible_rect().size
+	var aspect := viewport_size.x / viewport_size.y
+	var padded_radius := FIGHTER_FRAME_RADIUS + 0.35
+	var half_width := 0.0
+	for bot in bots:
+		var offset := bot.global_position + bot.linear_velocity * lead - camera.global_position
+		var horizontal := absf(offset.dot(camera.global_basis.x)) + padded_radius
+		var vertical := (absf(offset.dot(camera.global_basis.y)) + padded_radius) * aspect
+		half_width = maxf(half_width, maxf(horizontal, vertical))
+	return half_width * 2.0
+
+func _sample_framing() -> void:
+	var viewport_size := get_viewport().get_visible_rect().size
+	var margin := viewport_size.x / camera.size * FIGHTER_FRAME_RADIUS
+	for bot in bots:
+		var pixel := camera.unproject_position(bot.global_position)
+		var edge := minf(minf(pixel.x, viewport_size.x - pixel.x), minf(pixel.y, viewport_size.y - pixel.y))
+		framing_min_margin_px = minf(framing_min_margin_px, edge - margin)
+	framing_max_width = maxf(framing_max_width, camera.size)
 
 func _write_report() -> void:
 	var conditions := []
@@ -605,6 +642,9 @@ func _write_report() -> void:
 	if bulldozer_uses_tracks:
 		report.bulldozer_drive = "tracks"
 		report.bulldozer_ai = bulldozer_ai
+		report.arena_variant = "larger" if larger_arena else "current"
+		report.usable_floor_m = [float(cfg.arena_half_width) * 2.0 - ARENA_RAIL_THICKNESS,
+			float(cfg.arena_half_length) * 2.0 - ARENA_RAIL_THICKNESS]
 	if impact_fx != null:
 		report.peak_particles = impact_fx.peak_particles
 		report.peak_voices = impact_fx.peak_voices
@@ -628,7 +668,8 @@ func _write_report() -> void:
 			"mean_fps": frame_times.size() * 1000.0 / total, "p95_frame_ms": frame_times[floori((frame_times.size()-1) * 0.95)],
 			"p99_frame_ms": frame_times[floori((frame_times.size()-1) * 0.99)], "worst_frame_ms": frame_times.back(),
 			"viewport": [viewport.x, viewport.y], "renderer": RenderingServer.get_current_rendering_method(),
-			"gpu": RenderingServer.get_video_adapter_name(), "engine": Engine.get_version_info().string})
+			"gpu": RenderingServer.get_video_adapter_name(), "engine": Engine.get_version_info().string,
+			"minimum_fighter_margin_px": framing_min_margin_px, "maximum_camera_width_m": framing_max_width})
 
 func _write_json(path: String, data: Dictionary) -> void:
 	if path.is_empty():

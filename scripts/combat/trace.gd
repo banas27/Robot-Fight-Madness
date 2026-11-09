@@ -7,7 +7,7 @@ var next_sample := 0.0
 var detailed := false
 var tracked_ai := false
 var tracked_metrics := {"nonfinite_ticks": 0, "first_nonfinite_s": null, "push_s": [0.0, 0.0],
-	"productive_push_s": [0.0, 0.0], "longest_quiet_s": 0.0}
+	"productive_push_s": [0.0, 0.0], "longest_quiet_s": 0.0, "exchange_gaps_s": []}
 var last_exchange := 0.0
 var productive_run := [0.0, 0.0]
 var contact_time := 0.0
@@ -145,6 +145,8 @@ func observe_tick(bots: Array[RigidBody3D], delta: float, time: float, pair: Dic
 			tracked_metrics.first_nonfinite_s = time
 	tracked_metrics.longest_quiet_s = maxf(tracked_metrics.longest_quiet_s, time - last_exchange)
 	if exchange:
+		if last_exchange > 0.0 and time - last_exchange >= 0.35:
+			tracked_metrics.exchange_gaps_s.append(time - last_exchange)
 		last_exchange = time
 
 func _follow_exits(bot, watches: Array, gap: float, time: float, fighting: bool) -> void:

@@ -2,6 +2,7 @@ extends Node3D
 const Shapes = preload("res://scripts/shapes.gd")
 const Robot = preload("res://scripts/robot.gd")
 const HUD = preload("res://scripts/hud.gd")
+const ARENA_RAIL_THICKNESS := 0.3
 
 var cfg: Dictionary
 var bots: Array[RigidBody3D] = []
@@ -74,15 +75,17 @@ func _build_arena() -> void:
 	var l := float(cfg.arena_half_length)
 	Shapes.solid_box(self, Vector3(w * 2 + 1.1, 0.35, l * 2 + 1.1), Vector3(0, -0.25, 0), dark)
 	Shapes.box(self, Vector3(w * 2, 0.08, l * 2), Vector3(0, -0.04, 0), floor_mat)
-	for x in range(-4, 5):
+	var grid_x := floori(w)
+	var grid_z := floori(l)
+	for x in range(-grid_x, grid_x + 1):
 		Shapes.box(self, Vector3(0.018, 0.008, l * 2), Vector3(x, 0.007, 0), steel)
-	for z in range(-5, 6):
+	for z in range(-grid_z, grid_z + 1):
 		Shapes.box(self, Vector3(w * 2, 0.008, 0.018), Vector3(0, 0.007, z), steel)
 	for x in [-w, w]:
-		Shapes.solid_box(self, Vector3(0.3, 0.65, l * 2 + 0.3), Vector3(x, 0.25, 0), dark)
+		Shapes.solid_box(self, Vector3(ARENA_RAIL_THICKNESS, 0.65, l * 2 + ARENA_RAIL_THICKNESS), Vector3(x, 0.25, 0), dark)
 		Shapes.box(self, Vector3(0.34, 0.045, l * 2), Vector3(x, 0.6, 0), accent)
 	for z in [-l, l]:
-		Shapes.solid_box(self, Vector3(w * 2, 0.65, 0.3), Vector3(0, 0.25, z), dark)
+		Shapes.solid_box(self, Vector3(w * 2, 0.65, ARENA_RAIL_THICKNESS), Vector3(0, 0.25, z), dark)
 		Shapes.box(self, Vector3(w * 2, 0.045, 0.34), Vector3(0, 0.6, z), accent)
 	for x in [-w, w]:
 		for z in [-l, l]:
@@ -91,8 +94,9 @@ func _build_arena() -> void:
 	for z in [-3.4, 3.4]:
 		var color := Color("39d8e7") if z > 0 else Color("ff9045")
 		Shapes.box(self, Vector3(2.2, 0.015, 0.07), Vector3(0, 0.02, z), Shapes.material(color, 0, 0.5))
+	var stripe_x := floori(w - 0.55)
 	for z in [-l + 0.55, l - 0.55]:
-		for x in range(-3, 4):
+		for x in range(-stripe_x, stripe_x + 1):
 			var stripe := Shapes.box(self, Vector3(0.36, 0.015, 0.45), Vector3(x, 0.02, z), accent)
 			stripe.rotation.y = 0.45
 	var ring := TorusMesh.new()
