@@ -177,6 +177,7 @@ func inspect_depth(own, other, contact: Dictionary) -> void:
 			cross_checks.append({"axis": xyz(axis),
 				"overlap_offsets": _overlap_offsets(space, query, start, axis, other, contact.other_shape)})
 	deep_contacts.append({"time": contact_time, "body": str(own.name), "depth": contact.depth,
+		"depth_metric": "presolve_witness_projection_m", "shape_query_pose": "published_after_solve",
 		"roles": [contact.local_role, contact.other_role], "shapes": [contact.local_shape, contact.other_shape],
 		"overlap_offsets": overlap_offsets, "cross_checks": cross_checks,
 		"normal": xyz(contact.normal), "point": xyz(contact.point),

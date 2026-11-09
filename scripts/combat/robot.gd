@@ -43,6 +43,9 @@ var maneuver_age := 0.0
 var transition_reason := ""
 var trace_orders := false
 var last_order := Vector2.ZERO
+var audit_local_shape := -1
+var audit_other_shape := -1
+var audit_witnesses: Array[Dictionary] = []
 var maneuver_counts := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 var capability := Capability.ARMED
 var press_wide := false
@@ -145,6 +148,8 @@ func role_for_shape(index: int) -> String:
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	contacts.clear()
+	if audit_local_shape >= 0:
+		audit_witnesses.clear()
 	grounded = false
 	wall_contact = false
 	opponent_contact = false
@@ -163,10 +168,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		var impulse := state.get_contact_impulse(i).length() / mass
 		var local_shape := state.get_contact_local_shape(i)
 		var other_shape := state.get_contact_collider_shape(i)
+		if local_shape == audit_local_shape and other_shape == audit_other_shape and other == opponent:
+			audit_witnesses.append({"engine_frame": Engine.get_physics_frames(),
+				"own_point": here, "other_point": there, "normal": normal,
+				"own_point_velocity": state.get_contact_local_velocity_at_position(i),
+				"other_point_velocity": state.get_contact_collider_velocity_at_position(i),
+				"reported_impulse": state.get_contact_impulse(i)})
 		var is_wall := other.collision_layer == Fit.WALL
 		wall_contact = wall_contact or is_wall
 		opponent_contact = opponent_contact or other == opponent
 		var other_role: String = other.role_for_shape(other_shape) if other.has_method("role_for_shape") else "wall"
+		# This is the native contact witnesses' projection from the solve
+		# input pose. A query at the published pose is a separate measurement.
 		contacts.append({"point": point, "normal": normal, "strength": maxf(impulse, -relative.dot(normal) * 0.75),
 			"slide": (relative - normal * relative.dot(normal)).length(), "wall": is_wall,
 			"local_role": role_for_shape(local_shape), "other_role": other_role, "local_shape": local_shape, "other_shape": other_shape,

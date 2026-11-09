@@ -8,6 +8,7 @@ const ImpactFX = preload("res://scripts/combat/impacts.gd")
 const DebugOverlay = preload("res://scripts/combat/debug_overlay.gd")
 const Fit = preload("res://scripts/combat/collision_fit.gd")
 const EpisodeView = preload("res://scripts/presentation/episode_view.gd")
+const ContactAudit = preload("res://scripts/combat/contact_audit.gd")
 const TIME_EPSILON := 0.000001
 
 var combat: Dictionary
@@ -36,6 +37,7 @@ var wall_bumps := 0
 var perf_path := ""
 var trace_path := ""
 var trace
+var contact_audit: ContactAudit
 var frame_times: Array[float] = []
 var last_frame_us := 0
 const COMPONENT_NOTICES := {
@@ -76,6 +78,7 @@ func _ready() -> void:
 	combat_only = headless and "--combat-only" in OS.get_cmdline_user_args()
 	swapped_start = "--swap-start" in OS.get_cmdline_user_args()
 	debug_close = "--debug-close" in OS.get_cmdline_user_args()
+	var audit_options := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--perf="):
 			perf_path = arg.trim_prefix("--perf=")
@@ -85,6 +88,14 @@ func _ready() -> void:
 			trace.detailed = "--contact-trace" in OS.get_cmdline_user_args()
 		elif arg.begins_with("--riptide-ai="):
 			riptide_ai = arg.trim_prefix("--riptide-ai=")
+		elif arg.begins_with("--wheel-drum-audit="):
+			audit_options = arg.trim_prefix("--wheel-drum-audit=")
+	if not audit_options.is_empty():
+		contact_audit = ContactAudit.new()
+		if trace == null or not contact_audit.configure(audit_options):
+			push_error("Wheel/drum audit requires --trace and a tick,wheel-shape,drum-shape specification.")
+			get_tree().quit(2)
+			return
 	if riptide_ai not in ["baseline", "candidate", "rail-exit"]:
 		push_error("Unknown Riptide AI: " + riptide_ai)
 		get_tree().quit(2)
@@ -179,6 +190,9 @@ func _build_bots() -> void:
 		var kind := "saw" if i == 0 else "drum"
 		bot.configure(kind, combat, rng.randf_range(0, 6), not headless)
 		bot.trace_orders = trace != null and trace.detailed
+		if contact_audit != null:
+			bot.audit_local_shape = contact_audit.indices[i]
+			bot.audit_other_shape = contact_audit.indices[1 - i]
 		add_child(bot)
 		bot.position = Vector3(rng.randf_range(-0.4, 0.4), 0.4, 3.4 if i == 0 else -3.4)
 		bot.rotation.y = 0.0 if i == 0 else PI
@@ -225,6 +239,8 @@ func _physics_process(delta: float) -> void:
 	_update_notice(delta)
 	shake = move_toward(shake, 0.0, delta * 3.9)
 	fight_elapsed = minf(fight_elapsed + delta, float(cfg.fight_seconds))
+	if contact_audit != null:
+		contact_audit.publish(bots, fight_elapsed)
 	close_run = close_run + delta if bots[0].position.distance_to(bots[1].position) < 2.20 else 0.0
 	longest_close_run = maxf(longest_close_run, close_run)
 	var radius := _arena_radius()
@@ -270,6 +286,8 @@ func _physics_process(delta: float) -> void:
 				smoke_wait[i] = 0.92 if bot.hp <= 0.0 else 0.82
 	if trace != null:
 		trace.tick(bots, delta, fight_elapsed, radius, true)
+	if contact_audit != null:
+		contact_audit.submit(bots, fight_elapsed + delta)
 	if not screenshot_taken and screenshot_path != "" and fight_elapsed > 3.4 and not headless:
 		screenshot_taken = true
 		_save_screenshot.call_deferred()
@@ -506,8 +524,11 @@ func _write_report() -> void:
 	print("RFS_RESULT " + JSON.stringify(report))
 	_write_json(report_path, report)
 	if trace != null:
-		_write_json(trace_path, {"seed": match_seed, "robots": trace.entries, "strikes": trace.strikes,
-			"contact_runs": trace.contact_runs, "deep_contacts": trace.deep_contacts})
+		var details := {"seed": match_seed, "robots": trace.entries, "strikes": trace.strikes,
+			"contact_runs": trace.contact_runs, "deep_contacts": trace.deep_contacts}
+		if contact_audit != null:
+			details.wheel_drum = contact_audit.evidence()
+		_write_json(trace_path, details)
 	if perf_path != "" and not frame_times.is_empty():
 		var total := 0.0
 		for sample in frame_times:
