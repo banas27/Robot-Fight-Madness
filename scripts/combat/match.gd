@@ -3,6 +3,8 @@ extends "res://scripts/match.gd"
 const CombatRobot = preload("res://scripts/combat/robot.gd")
 const RiptideFlank = preload("res://scripts/combat/riptide_flank.gd")
 const RiptideRailExit = preload("res://scripts/combat/riptide_rail_exit.gd")
+const RiptideTrackedFlank = preload("res://scripts/combat/riptide_tracked_flank.gd")
+const BulldozerTrackedIntercept = preload("res://scripts/combat/bulldozer_tracked_intercept.gd")
 const WeaponContact = preload("res://scripts/combat/weapon_contact.gd")
 const ImpactFX = preload("res://scripts/combat/impacts.gd")
 const DebugOverlay = preload("res://scripts/combat/debug_overlay.gd")
@@ -67,6 +69,7 @@ var intro_shot_seconds: float
 var combat_only := false
 var swapped_start := false
 var riptide_ai := "baseline"
+var bulldozer_ai := "baseline"
 var start_poses: Array[Array] = []
 const RESULT_RATIO_TOLERANCE := 0.000001
 
@@ -96,8 +99,11 @@ func _ready() -> void:
 			trace_path = arg.trim_prefix("--trace=")
 			trace = preload("res://scripts/combat/trace.gd").new()
 			trace.detailed = "--contact-trace" in OS.get_cmdline_user_args()
+			trace.tracked_ai = bulldozer_uses_tracks
 		elif arg.begins_with("--riptide-ai="):
 			riptide_ai = arg.trim_prefix("--riptide-ai=")
+		elif arg.begins_with("--bulldozer-ai="):
+			bulldozer_ai = arg.trim_prefix("--bulldozer-ai=")
 		elif arg.begins_with("--wheel-drum-audit="):
 			audit_options = arg.trim_prefix("--wheel-drum-audit=")
 	if not audit_options.is_empty():
@@ -106,8 +112,16 @@ func _ready() -> void:
 			push_error("Wheel/drum audit requires --trace and a tick,wheel-shape,drum-shape specification.")
 			get_tree().quit(2)
 			return
-	if riptide_ai not in ["baseline", "candidate", "rail-exit"]:
+	if riptide_ai not in ["baseline", "candidate", "rail-exit", "tracked-flank"]:
 		push_error("Unknown Riptide AI: " + riptide_ai)
+		get_tree().quit(2)
+		return
+	if bulldozer_ai not in ["baseline", "tracked-intercept"]:
+		push_error("Unknown Bulldozer AI: " + bulldozer_ai)
+		get_tree().quit(2)
+		return
+	if not bulldozer_uses_tracks and (riptide_ai == "tracked-flank" or bulldozer_ai != "baseline"):
+		push_error("Tracked AI policies require the functional tracked arena.")
 		get_tree().quit(2)
 		return
 	super._ready()
@@ -195,6 +209,10 @@ func _build_bots() -> void:
 			bot = RiptideFlank.new()
 		elif i == 0 and riptide_ai == "rail-exit":
 			bot = RiptideRailExit.new()
+		elif i == 0 and riptide_ai == "tracked-flank":
+			bot = RiptideTrackedFlank.new()
+		elif i == 1 and bulldozer_ai == "tracked-intercept":
+			bot = BulldozerTrackedIntercept.new()
 		else:
 			bot = CombatRobot.new()
 		var kind := "saw" if i == 0 else "drum"
@@ -202,7 +220,7 @@ func _build_bots() -> void:
 			bot.visual_override = bulldozer_visual_override
 			bot.tracked_drive = bulldozer_uses_tracks
 		bot.configure(kind, combat, rng.randf_range(0, 6), not headless)
-		bot.trace_orders = trace != null and trace.detailed
+		bot.trace_orders = trace != null and (trace.detailed or trace.tracked_ai)
 		if contact_audit != null:
 			bot.audit_local_shape = contact_audit.indices[i]
 			bot.audit_other_shape = contact_audit.indices[1 - i]
@@ -262,6 +280,8 @@ func _physics_process(delta: float) -> void:
 		probe.contact_time = fight_elapsed
 	var pair := WeaponContact.read_pair(bots, delta, probe)
 	last_weapon_depth = float(pair.weapon_depth)
+	if trace != null and trace.tracked_ai:
+		trace.observe_tick(bots, delta, fight_elapsed, pair)
 	peak_weapon_depth = maxf(peak_weapon_depth, last_weapon_depth)
 	deep_overlap_time = deep_overlap_time + delta if last_weapon_depth > 0.025 else 0.0
 	longest_deep_overlap = maxf(longest_deep_overlap, deep_overlap_time)
@@ -576,6 +596,9 @@ func _write_report() -> void:
 		"longest_weapon_depth_over_25mm": longest_deep_overlap, "end_weapon_contact_depth": last_weapon_depth,
 		"end_center_gap": bots[0].position.distance_to(bots[1].position), "component_events": component_events,
 		"maneuvers": [bots[0].maneuver_counts, bots[1].maneuver_counts]}
+	if bulldozer_uses_tracks:
+		report.bulldozer_drive = "tracks"
+		report.bulldozer_ai = bulldozer_ai
 	if impact_fx != null:
 		report.peak_particles = impact_fx.peak_particles
 		report.peak_voices = impact_fx.peak_voices
@@ -584,6 +607,8 @@ func _write_report() -> void:
 	if trace != null:
 		var details := {"seed": match_seed, "robots": trace.entries, "strikes": trace.strikes,
 			"contact_runs": trace.contact_runs, "deep_contacts": trace.deep_contacts}
+		if trace.tracked_ai:
+			details.tracked_metrics = trace.tracked_metrics
 		if contact_audit != null:
 			details.wheel_drum = contact_audit.evidence()
 		_write_json(trace_path, details)

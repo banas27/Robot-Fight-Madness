@@ -14,7 +14,8 @@ SEEDS = PROJECT / "qa/riptide-ai/seeds.json"
 POLICIES = ("baseline", "candidate", "rail-exit")
 
 
-def run_match(godot, root, seed, layout, variant, episode=False, trace_level="standard"):
+def run_match(godot, root, seed, layout, variant, episode=False, trace_level="standard",
+              *, scene=None, extra_args=(), keep_log=False):
     folder = root / variant / layout
     folder.mkdir(parents=True, exist_ok=True)
     stem = str(seed) + ("-episode" if episode else "")
@@ -24,9 +25,10 @@ def run_match(godot, root, seed, layout, variant, episode=False, trace_level="st
     report.unlink(missing_ok=True)
     trace.unlink(missing_ok=True)
     args = [
-        godot, "--headless", "--path", str(PROJECT), "--fixed-fps", "30", "--",
+        godot, "--headless", "--path", str(PROJECT), "--fixed-fps", "30",
+        *([scene] if scene else []), "--",
         "--autostop", f"--seed={seed}", f"--riptide-ai={variant}",
-        f"--report={report}",
+        f"--report={report}", *extra_args,
     ]
     if trace_level != "untraced":
         args.append(f"--trace={trace}")
@@ -36,8 +38,16 @@ def run_match(godot, root, seed, layout, variant, episode=False, trace_level="st
         args.append("--combat-only")
     if layout == "swapped":
         args.append("--swap-start")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    log = folder / f"{stem}.log"
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        if keep_log:
+            log.write_bytes((exc.stdout or b"") + (exc.stderr or b""))
+        raise
     output = result.stdout + result.stderr
+    if keep_log:
+        log.write_text(output, encoding="utf-8")
     if result.returncode or "ERROR:" in output or not report.exists() or (trace_level != "untraced" and not trace.exists()):
         raise RuntimeError(f"{variant}/{layout}/{seed} failed:\n{output}")
     match = json.loads(report.read_text(encoding="utf-8"))

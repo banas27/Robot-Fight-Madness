@@ -5,6 +5,11 @@ var strikes: Array[Dictionary] = []
 var pending: Array[Dictionary] = []
 var next_sample := 0.0
 var detailed := false
+var tracked_ai := false
+var tracked_metrics := {"nonfinite_ticks": 0, "first_nonfinite_s": null, "push_s": [0.0, 0.0],
+	"productive_push_s": [0.0, 0.0], "longest_quiet_s": 0.0}
+var last_exchange := 0.0
+var productive_run := [0.0, 0.0]
 var contact_time := 0.0
 var contact_runs := {}
 var deep_contacts: Array[Dictionary] = []
@@ -75,7 +80,8 @@ func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, 
 			escape.end_gap = gap
 			row.recoveries.append(escape)
 			row.escape = {}
-		if row.pass_index >= 0:
+		var continuation: bool = tracked_ai and bot.kind == "drum" and state == bot.Maneuver.RAM_PRESS and row.pass_index >= 0
+		if row.pass_index >= 0 and not continuation:
 			row.passes[row.pass_index].end = time
 			row.pass_index = -1
 		row.state = state
@@ -112,6 +118,35 @@ func tick(bots: Array[RigidBody3D], delta: float, time: float, radius: Vector2, 
 		if time - float(result.time) >= 0.16 or not fighting:
 			pending.remove_at(i)
 
+func observe_tick(bots: Array[RigidBody3D], delta: float, time: float, pair: Dictionary) -> void:
+	var finite := is_finite(pair.weapon_depth)
+	var exchange: bool = pair.hits.any(func(hit): return not hit.is_empty())
+	for i in range(2):
+		var bot = bots[i]
+		var opponent = bots[1 - i]
+		var forward: Vector3 = bot.deck_forward(bot.global_basis)
+		finite = finite and bot.global_transform.is_finite() and bot.linear_velocity.is_finite() \
+			and bot.angular_velocity.is_finite() and bot.last_order.is_finite() and is_finite(bot.rotor_speed)
+		var pushing := false
+		for contact in bot.contacts:
+			finite = finite and contact.point.is_finite() and contact.normal.is_finite() \
+				and contact.relative.is_finite() and is_finite(contact.depth) and is_finite(contact.strength)
+			if contact.other_id == opponent.get_instance_id() and bot.last_order.x > 0.4 \
+					and forward.dot(contact.normal) < -0.35 and bot.to_local(contact.point).z < -0.30:
+				pushing = true
+		var productive: bool = pushing and opponent.linear_velocity.dot(forward) >= 0.45
+		tracked_metrics.push_s[i] += delta * int(pushing)
+		tracked_metrics.productive_push_s[i] += delta * int(productive)
+		productive_run[i] = productive_run[i] + delta if productive else 0.0
+		exchange = exchange or productive_run[i] >= 0.15
+	if not finite:
+		tracked_metrics.nonfinite_ticks += 1
+		if tracked_metrics.first_nonfinite_s == null:
+			tracked_metrics.first_nonfinite_s = time
+	tracked_metrics.longest_quiet_s = maxf(tracked_metrics.longest_quiet_s, time - last_exchange)
+	if exchange:
+		last_exchange = time
+
 func _follow_exits(bot, watches: Array, gap: float, time: float, fighting: bool) -> void:
 	for i in range(watches.size() - 1, -1, -1):
 		var exit: Dictionary = watches[i]
@@ -135,6 +170,9 @@ func _decision(bot, time: float, gap: float) -> Dictionary:
 		row.decision = bot.decision_note()
 	if detailed:
 		row.wheels = bot.wheel_state.duplicate()
+		if bot.tracked_drive:
+			row.tracks = bot.track_state.duplicate()
+			row.road_wheels = bot.road_wheel_state.duplicate()
 		row.weapon_disabled = bot.weapon_disabled
 		row.cooldown = bot.cooldown
 		row.latched = bot.strike_latched

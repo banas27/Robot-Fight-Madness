@@ -43,7 +43,7 @@ def peak_db(log):
     return float(levels[0])
 
 
-def verify(ffmpeg, video, report):
+def verify(ffmpeg, video, report, tracked_policies=None):
     picture = decode(ffmpeg, video, "-map", "0:v:0", "-an", "-vf", f"scale={SIZE[0]}:{SIZE[1]}:flags=area",
                      "-pix_fmt", "gray", "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1")
     info = picture.stderr.decode(errors="replace")
@@ -58,7 +58,12 @@ def verify(ffmpeg, video, report):
     assert [name for name, _ in phases] == ["riptide_intro", "bulldozer_intro", "combat", "result"], phases
     assert [count for _, count in phases[:2]] == [150, 150], phases
     assert report["intro_duration"] == 10 and report["showcase_duration"] == 5, report
-    assert report["riptide_ai"] == "baseline", report
+    if tracked_policies is None:
+        assert report["riptide_ai"] == "baseline", report
+    else:
+        assert (report["riptide_ai"], report["bulldozer_ai"]) == tuple(tracked_policies), report
+        assert report["bulldozer_drive"] == "tracks", report
+        assert len(report["final_conditions"][1]["tracks"]) == 2, report
     assert [pose[3] for pose in report["start_poses"]] == report["max_hp"], report
     assert [pose[4] for pose in report["start_poses"]] == [0, 0], report
     fight = report["fight_duration"]
@@ -81,10 +86,12 @@ def main():
     parser.add_argument("--ffmpeg", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--case", action="append", nargs=2, metavar=("MP4", "MATCH_JSON"), required=True)
+    parser.add_argument("--tracked-policies", nargs=2, metavar=("RIPTIDE", "BULLDOZER"))
     args = parser.parse_args()
     evidence = []
     for video, report in args.case:
-        row = verify(args.ffmpeg, Path(video), json.loads(Path(report).read_text(encoding="utf-8-sig")))
+        row = verify(args.ffmpeg, Path(video), json.loads(Path(report).read_text(encoding="utf-8-sig")),
+                     args.tracked_policies)
         evidence.append(row)
         print(json.dumps(row))
     args.output.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
